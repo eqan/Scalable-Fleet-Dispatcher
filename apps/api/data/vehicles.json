@@ -1,0 +1,14 @@
+[
+  {
+    "id": "v_001",
+    "name": "Blue Van",
+    "capacity_kg": 500,
+    "start_location": { "lat": 40.7128, "lng": -74.006 }
+  },
+  {
+    "id": "v_002",
+    "name": "Red Truck",
+    "capacity_kg": 2500,
+    "start_location": { "lat": 40.7128, "lng": -74.006 }
+  }
+]

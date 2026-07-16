@@ -1,0 +1,6 @@
+{
+  "assignments": [
+    { "vehicle_id": "v_001", "route": ["o_101", "o_102", "o_104"] },
+    { "vehicle_id": "v_002", "route": ["o_105"] }
+  ]
+}

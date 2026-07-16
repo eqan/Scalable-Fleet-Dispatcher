@@ -1,0 +1,27 @@
+FROM oven/bun:1 AS base
+WORKDIR /app
+
+# Copy workspace root config
+COPY package.json bun.lock ./
+
+# Copy shared package
+COPY packages/shared/package.json packages/shared/
+COPY packages/shared/src packages/shared/src/
+
+# Copy API package
+COPY apps/api/package.json apps/api/
+
+# Copy web package.json (needed for workspace-aware lockfile resolution)
+COPY apps/web/package.json apps/web/
+
+# Install dependencies (workspace-aware)
+RUN bun install --frozen-lockfile --production
+
+# Copy API source
+COPY apps/api/src apps/api/src/
+
+# Run as non-root user (least-privilege principle)
+USER bun
+
+WORKDIR /app/apps/api
+CMD ["bun", "run", "src/worker.ts"]

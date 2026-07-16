@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "arqh-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:4000"]
+        labels:
+          service: "arqh-api"

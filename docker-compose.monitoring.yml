@@ -1,0 +1,76 @@
+# ================================================================
+# Production Monitoring Stack
+#
+# Runs alongside the PM2-based API — does NOT contain the API itself.
+# The API exposes /metrics on the host at 127.0.0.1:4000.
+#
+# Usage:
+#   docker compose -f docker-compose.monitoring.yml up -d
+#
+# Access:
+#   Grafana:    https://grafana.canilgu.org  (admin / $GF_SECURITY_ADMIN_PASSWORD)
+#   Prometheus: http://127.0.0.1:9090        (internal only)
+#   Loki:       http://127.0.0.1:3100        (internal only)
+# ================================================================
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "127.0.0.1:9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./packages/monitoring/prometheus/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./packages/monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - ./packages/monitoring/promtail/promtail-prod-config.yml:/etc/promtail/config.yml:ro
+      - /root/.pm2/logs:/var/log/pm2:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      loki:
+        condition: service_started
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./packages/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-ChangeMeN0w!}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: https://grafana.canilgu.org
+      GF_SERVER_DOMAIN: grafana.canilgu.org
+    depends_on:
+      prometheus:
+        condition: service_started
+      loki:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:

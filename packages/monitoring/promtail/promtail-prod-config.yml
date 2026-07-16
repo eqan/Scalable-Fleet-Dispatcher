@@ -1,0 +1,44 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # ---- PM2 API logs (pino JSON on stdout) ----
+  - job_name: pm2-api
+    static_configs:
+      - targets: ["localhost"]
+        labels:
+          job: "arqh-api"
+          service: "api"
+          stream: "stdout"
+          __path__: /var/log/pm2/arqh-api-out.log
+
+      - targets: ["localhost"]
+        labels:
+          job: "arqh-api"
+          service: "api"
+          stream: "stderr"
+          __path__: /var/log/pm2/arqh-api-error.log
+
+  # ---- PM2 Worker logs ----
+  - job_name: pm2-worker
+    static_configs:
+      - targets: ["localhost"]
+        labels:
+          job: "arqh-worker"
+          service: "worker"
+          stream: "stdout"
+          __path__: /var/log/pm2/arqh-worker-out.log
+
+      - targets: ["localhost"]
+        labels:
+          job: "arqh-worker"
+          service: "worker"
+          stream: "stderr"
+          __path__: /var/log/pm2/arqh-worker-error.log
