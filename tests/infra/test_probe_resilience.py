@@ -26,6 +26,25 @@ def _api_endpoints_available(core_api: client.CoreV1Api, namespace: str, release
     return False
 
 
+def _api_pods_ready(core_api: client.CoreV1Api, namespace: str, release_name: str) -> bool:
+    """True when every API pod is Ready (avoids leaving a reconnecting replica behind)."""
+    pods = core_api.list_namespaced_pod(
+        namespace,
+        label_selector=f"app.kubernetes.io/instance={release_name},app.kubernetes.io/name=api",
+    ).items
+    if not pods:
+        return False
+    for pod in pods:
+        ready = False
+        for condition in pod.status.conditions or []:
+            if condition.type == "Ready" and condition.status == "True":
+                ready = True
+                break
+        if not ready:
+            return False
+    return True
+
+
 def test_redis_failure_flips_readiness_without_restarting_api(
     core_api: client.CoreV1Api,
     apps_api: client.AppsV1Api,
@@ -56,13 +75,22 @@ def test_redis_failure_flips_readiness_without_restarting_api(
 
     assert degraded, "readiness never degraded after deleting the redis pod"
 
+    # Wait for Redis, both API replicas, and ingress health — a single 200 can
+    # land while the other replica is still NotReady after ioredis reconnects.
     recovery_deadline = time.time() + 180
     while time.time() < recovery_deadline:
-        statefulset = apps_api.read_namespaced_stateful_set(resource_name(release_name, "redis"), namespace)
-        if statefulset.status.ready_replicas == 1:
-            response = http.get(f"{base_url}/api/health", timeout=10)
-            if response.status_code == 200:
-                break
+        statefulset = apps_api.read_namespaced_stateful_set(
+            resource_name(release_name, "redis"), namespace
+        )
+        if statefulset.status.ready_replicas == 1 and _api_pods_ready(
+            core_api, namespace, release_name
+        ):
+            try:
+                response = http.get(f"{base_url}/api/health", timeout=10)
+                if response.status_code == 200 and response.json().get("status") == "healthy":
+                    break
+            except requests.RequestException:
+                pass
         time.sleep(3)
     else:
         raise AssertionError("redis did not recover and restore API health in time")

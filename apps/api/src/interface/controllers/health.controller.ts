@@ -1,11 +1,6 @@
 import type { Request, Response } from "express";
 import { recordDependencyHealth } from "../middleware/metrics.ts";
 
-/* ------------------------------------------------------------------ */
-/*  Types                                                              */
-/* ------------------------------------------------------------------ */
-
-/** Minimal interface for health-checkable services (ISP -- SOLID). */
 export interface Pingable {
   ping(): Promise<boolean>;
 }
@@ -26,9 +21,8 @@ interface HealthResponse {
   };
 }
 
-/* ------------------------------------------------------------------ */
-/*  DRY helper: measure latency + catch errors for any service check   */
-/* ------------------------------------------------------------------ */
+const roundMs = (start: number): number =>
+  Math.round((performance.now() - start) * 100) / 100;
 
 const probeService = async (
   fn: () => Promise<unknown>,
@@ -36,28 +30,21 @@ const probeService = async (
   const start = performance.now();
   try {
     await fn();
-    return {
-      status: "connected",
-      latency_ms: Math.round((performance.now() - start) * 100) / 100,
-    };
+    return { status: "connected", latency_ms: roundMs(start) };
   } catch (error) {
     return {
       status: "error",
-      latency_ms: Math.round((performance.now() - start) * 100) / 100,
+      latency_ms: roundMs(start),
       error: error instanceof Error ? error.message : "Unknown error",
     };
   }
 };
 
-/* ------------------------------------------------------------------ */
-/*  Controller factory (dependencies injected -- DIP)                  */
-/* ------------------------------------------------------------------ */
-
 export const createHealthController = (deps: {
   draftStore: Pingable;
   durableStore: Pingable;
 }) => ({
-  // Dependency-free — used for liveness/startup so Redis/Mongo blips do not restart pods.
+  // Liveness/startup: never depends on Redis/Mongo.
   live: (_req: Request, res: Response): void => {
     res.status(200).json({
       status: "alive",
@@ -66,14 +53,13 @@ export const createHealthController = (deps: {
     });
   },
 
+  // Readiness: 503 when a dependency is down; also feeds Prometheus gauges.
   check: async (_req: Request, res: Response): Promise<void> => {
     const [redisHealth, mongoHealth] = await Promise.all([
       probeService(() => deps.draftStore.ping()),
       probeService(() => deps.durableStore.ping()),
     ]);
 
-    // Feed Prometheus from readiness probes so Grafana sees fresh dep signals
-    // without a separate scraper loop (probes already hit this path).
     recordDependencyHealth("redis", redisHealth.status, redisHealth.latency_ms);
     recordDependencyHealth("mongo", mongoHealth.status, mongoHealth.latency_ms);
 

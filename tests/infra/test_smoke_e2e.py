@@ -124,40 +124,16 @@ def test_optimize_pipeline_updates_state_revision(
     raise AssertionError("optimization result did not update state in time")
 
 
-def _next_state_change(response: requests.Response, deadline: float) -> Optional[dict]:
-    """Parse the SSE byte stream and return the first `state_changed` payload."""
-    event_name: Optional[str] = None
-    data: list[str] = []
-
-    for raw in response.iter_lines(decode_unicode=True):
-        if time.time() > deadline:
-            return None
-        line = (raw or "").rstrip("\r")
-        if line == "":  # blank line terminates one event
-            if event_name == "state_changed" and data:
-                return json.loads("\n".join(data))
-            event_name, data = None, []
-        elif line.startswith("event:"):
-            event_name = line[len("event:"):].strip()
-        elif line.startswith("data:"):
-            data.append(line[len("data:"):].strip())
-    return None
-
-
 def test_sse_stream_emits_state_change_events(
     http: requests.Session,
     base_url: str,
 ) -> None:
-    """SSE must survive multi-replica routing: stream on one pod, mutate on another.
+    """Prove SSE works across API replicas (stream may land on a different pod than the mutation).
 
-    Important: consume the SSE body with a *single* ``iter_lines()`` loop.
-    Calling ``iter_lines()`` twice on the same response exhausts the first
-    iterator and makes the second see an empty/closed stream under requests.
+    Use one Session for the SSE socket and a single iter_lines() pass — requests
+    cannot iterate a streamed body twice.
     """
     order_id = f"infra-sse-{uuid.uuid4().hex[:8]}"
-
-    # Dedicated session so the mutation's short-lived connection cannot recycle
-    # the long-lived SSE socket out of a shared urllib3 pool.
     sse = requests.Session()
     sse.verify = False
 
@@ -193,24 +169,28 @@ def test_sse_stream_emits_state_change_events(
                         event_name = line[len("event:"):].strip()
                         continue
 
-                    if line.startswith("data:"):
-                        chunk = line[len("data:"):].strip()
-                        data.append(chunk)
-                        if connected:
-                            continue
-                        try:
-                            hello = json.loads(chunk)
-                        except json.JSONDecodeError:
-                            continue
-                        if hello.get("type") != "connected":
-                            continue
-                        connected = True
-                        assert _post(http, base_url, "/api/orders", {
-                            "id": order_id,
-                            "weight_kg": 15,
-                            "location": {"lat": 40.7410, "lng": -73.9897},
-                            "service_time_min": 10,
-                        }).status_code == 201
+                    if not line.startswith("data:"):
+                        continue
+
+                    chunk = line[len("data:"):].strip()
+                    data.append(chunk)
+                    if connected:
+                        continue
+
+                    try:
+                        hello = json.loads(chunk)
+                    except json.JSONDecodeError:
+                        continue
+                    if hello.get("type") != "connected":
+                        continue
+
+                    connected = True
+                    assert _post(http, base_url, "/api/orders", {
+                        "id": order_id,
+                        "weight_kg": 15,
+                        "location": {"lat": 40.7410, "lng": -73.9897},
+                        "service_time_min": 10,
+                    }).status_code == 201
 
                 assert connected, "SSE stream never sent the connected frame"
                 assert payload is not None, "did not receive a state_changed SSE event"

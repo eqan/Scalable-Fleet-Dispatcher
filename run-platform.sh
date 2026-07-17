@@ -91,8 +91,14 @@ wait_for_rollout() {
   kubectl -n "$K8S_NAMESPACE" rollout status "$resource" --timeout=240s
 }
 
-ensure_namespace() {
-  kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+ensure_ns() {
+  local ns="$1"
+  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+}
+
+read_env_value() {
+  local file="$1" key="$2"
+  sed -n "s/^${key}=//p" "$file" | head -n1
 }
 
 cmd_preflight() {
@@ -265,16 +271,6 @@ install_ingress_nginx() {
   log "ingress-nginx ready ✅"
 }
 
-ensure_monitoring_namespace() {
-  kubectl create namespace "$MONITORING_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-}
-
-# Read KEY=VALUE where the value may itself contain '=' (e.g. base64 padding).
-read_env_value() {
-  local file="$1" key="$2"
-  sed -n "s/^${key}=//p" "$file" | head -n1
-}
-
 ensure_tls_secret_for_host() {
   local namespace="$1"
   local secret_name="$2"
@@ -313,9 +309,7 @@ ensure_grafana_admin_secret() {
   if [ ! -f "$GRAFANA_CREDS_FILE" ]; then
     {
       echo "admin-user=admin"
-      # Avoid '=' in the password so naive KEY=VALUE parsers elsewhere stay safe;
-      # still use sed -n 's/^key=//' when reading (base64 padding edge case).
-      printf 'admin-password=%s\n' "$(openssl rand -base64 32 | tr -d '\n=/+')"
+      printf 'admin-password=%s\n' "$(openssl rand -hex 24)"
     } > "$GRAFANA_CREDS_FILE"
     chmod 600 "$GRAFANA_CREDS_FILE"
   fi
@@ -366,31 +360,32 @@ apply_monitoring_grafana_assets() {
 }
 
 wait_for_monitoring_stack() {
-  kubectl -n "$MONITORING_NAMESPACE" rollout status deployment/monitoring-grafana --timeout=240s
-  kubectl -n "$MONITORING_NAMESPACE" rollout status deployment/monitoring-kube-state-metrics --timeout=240s
-  kubectl -n "$MONITORING_NAMESPACE" rollout status deployment/monitoring-kube-prometheus-operator --timeout=240s
-  kubectl -n "$MONITORING_NAMESPACE" rollout status statefulset/monitoring-loki --timeout=240s
-  kubectl -n "$MONITORING_NAMESPACE" rollout status daemonset/monitoring-promtail --timeout=240s
-
-  for _ in $(seq 1 60); do
-    if kubectl -n "$MONITORING_NAMESPACE" wait \
-      --for=condition=Ready \
-      pod \
-      -l operator.prometheus.io/name=monitoring-kube-prometheus-prometheus \
-      --timeout=5s >/dev/null 2>&1; then
-      log "Prometheus pod is ready ✅"
-      return 0
-    fi
-    sleep 2
+  local resource
+  for resource in \
+    deployment/monitoring-grafana \
+    deployment/monitoring-kube-state-metrics \
+    deployment/monitoring-kube-prometheus-operator \
+    statefulset/monitoring-loki \
+    daemonset/monitoring-promtail
+  do
+    kubectl -n "$MONITORING_NAMESPACE" rollout status "$resource" --timeout=240s
   done
 
-  err "Prometheus pod did not become ready in time."
-  kubectl get pods -n "$MONITORING_NAMESPACE" || true
-  return 1
+  # Prometheus is operator-managed (not a Helm rollout target).
+  if ! kubectl -n "$MONITORING_NAMESPACE" wait \
+    --for=condition=Ready \
+    pod \
+    -l operator.prometheus.io/name=monitoring-kube-prometheus-prometheus \
+    --timeout=180s >/dev/null 2>&1; then
+    err "Prometheus pod did not become ready in time."
+    kubectl get pods -n "$MONITORING_NAMESPACE" || true
+    return 1
+  fi
+
+  log "Prometheus pod is ready ✅"
 }
 
 install_monitoring_stack() {
-  ensure_monitoring_namespace
   ensure_tls_secret_for_host "$MONITORING_NAMESPACE" "$GRAFANA_TLS_SECRET_NAME" "$GRAFANA_HOST"
   ensure_grafana_admin_secret
 
@@ -414,8 +409,8 @@ install_monitoring_stack() {
 }
 
 cmd_deps() {
-  ensure_namespace
-  ensure_monitoring_namespace
+  ensure_ns "$K8S_NAMESPACE"
+  ensure_ns "$MONITORING_NAMESPACE"
   install_metrics_server
   install_ingress_nginx
   ensure_tls_secret
@@ -445,7 +440,7 @@ wait_for_workloads() {
 }
 
 cmd_deploy() {
-  ensure_namespace
+  ensure_ns "$K8S_NAMESPACE"
   build_local_images
   load_images_into_kind
 
