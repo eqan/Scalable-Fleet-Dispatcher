@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "arqh.componentName" (dict "root" . "name" "worker") }}
+  labels:
+    {{- include "arqh.commonLabels" (dict "root" . "name" "worker" "component" "worker") | nindent 4 }}
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "arqh.selectorLabels" (dict "root" . "name" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "arqh.commonLabels" (dict "root" . "name" "worker" "component" "worker") | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "arqh.componentName" (dict "root" . "name" "config") }}
+            - secretRef:
+                name: {{ include "arqh.componentName" (dict "root" . "name" "secrets") }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          securityContext:
+            {{- include "arqh.containerSecurity" (dict "uid" 1000) | nindent 12 }}

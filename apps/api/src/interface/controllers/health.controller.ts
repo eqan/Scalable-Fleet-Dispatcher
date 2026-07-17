@@ -56,6 +56,14 @@ export const createHealthController = (deps: {
   draftStore: Pingable;
   durableStore: Pingable;
 }) => ({
+  live: (_req: Request, res: Response): void => {
+    res.status(200).json({
+      status: "alive",
+      timestamp: new Date().toISOString(),
+      uptime_s: Math.round(process.uptime() * 100) / 100,
+    });
+  },
+
   check: async (_req: Request, res: Response): Promise<void> => {
     const [redisHealth, mongoHealth] = await Promise.all([
       probeService(() => deps.draftStore.ping()),

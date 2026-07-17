@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "arqh.componentName" (dict "root" . "name" "web") }}
+  labels:
+    {{- include "arqh.commonLabels" (dict "root" . "name" "web" "component" "proxy") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "arqh.selectorLabels" (dict "root" . "name" "web") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.web.service.port }}
+      targetPort: http

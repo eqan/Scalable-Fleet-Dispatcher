@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "arqh.componentName" (dict "root" . "name" "api") }}
+  labels:
+    {{- include "arqh.commonLabels" (dict "root" . "name" "api" "component" "backend") | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "arqh.selectorLabels" (dict "root" . "name" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "arqh.commonLabels" (dict "root" . "name" "api" "component" "backend") | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 20
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: api
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.containerPort }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "arqh.componentName" (dict "root" . "name" "config") }}
+            - secretRef:
+                name: {{ include "arqh.componentName" (dict "root" . "name" "secrets") }}
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: {{ .Values.api.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.api.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.api.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.api.probes.readiness.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /api/live
+              port: http
+            periodSeconds: {{ .Values.api.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.api.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.api.probes.liveness.failureThreshold }}
+          startupProbe:
+            httpGet:
+              path: /api/live
+              port: http
+            periodSeconds: {{ .Values.api.probes.startup.periodSeconds }}
+            timeoutSeconds: {{ .Values.api.probes.startup.timeoutSeconds }}
+            failureThreshold: {{ .Values.api.probes.startup.failureThreshold }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            {{- include "arqh.containerSecurity" (dict "uid" 1000) | nindent 12 }}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: arqh-platform
+description: Local kind Helm chart for the Arqh platform
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

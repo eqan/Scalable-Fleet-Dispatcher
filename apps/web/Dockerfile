@@ -1,4 +1,7 @@
-FROM oven/bun:1 AS build
+# Base image is parameterized via ARG with a pinned default tag.
+ARG BUN_IMAGE=oven/bun:1
+# hadolint ignore=DL3006
+FROM ${BUN_IMAGE} AS build
 WORKDIR /app
 
 # Copy workspace root config
@@ -25,13 +28,16 @@ WORKDIR /app/apps/web
 RUN bun run build
 
 # Serve with nginx
-FROM nginx:1.27-alpine
+# Serving image is parameterized via ARG with a pinned default tag.
+ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.27-alpine
+# hadolint ignore=DL3006
+FROM ${NGINX_IMAGE}
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 COPY apps/web/nginx/default.conf.template /etc/nginx/templates/default.conf.template
 
 ENV API_HOST=api
 ENV API_PORT=4000
 
-EXPOSE 80
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1

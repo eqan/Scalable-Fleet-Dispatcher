@@ -1,0 +1,16 @@
+imagePullPolicy: Always
+
+api:
+  image:
+    repository: ghcr.io/example/arqh-api
+    tag: latest
+
+worker:
+  image:
+    repository: ghcr.io/example/arqh-worker
+    tag: latest
+
+web:
+  image:
+    repository: ghcr.io/example/arqh-web
+    tag: latest

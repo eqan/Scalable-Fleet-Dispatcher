@@ -2,15 +2,12 @@
 # ================================================================
 # Arqh Platform Control Script
 #
-# Phase 1: reproducible local baseline via Docker Compose so the
-#          project runs on any machine (macOS / Linux / Windows-WSL2).
+# Submission-default path:
+#   kind cluster -> ingress-nginx + metrics-server -> local image load
+#   -> Helm deploy -> infra smoke tests through the Ingress.
 #
-# Phase 2 will extend this script with Kubernetes commands
-# (cluster provisioning, Helm install, smoke gates) and the
-# docker-compose baseline will be superseded per the challenge brief.
-#
-# Usage: ./run-platform.sh <command>
-#   (Windows: run under WSL2 or Git Bash.)
+# The old Docker Compose baseline remains available via explicit
+# compose-* commands for local fallback / comparison.
 # ================================================================
 
 set -euo pipefail
@@ -22,12 +19,27 @@ COMPOSE_FILE="docker-compose.yml"
 DEBUG_COMPOSE_FILE="docker-compose.debug.yml"
 ENV_FILE=".env.docker"
 
-# ---- Pretty logging ----
+KIND_CLUSTER_NAME="arqh"
+KIND_CONFIG="infra/kind/kind-cluster.yaml"
+K8S_NAMESPACE="arqh"
+RELEASE_NAME="arqh"
+CHART_DIR="infra/helm/arqh-platform"
+INGRESS_HOST="${INGRESS_HOST:-arqh.localtest.me}"
+TLS_SECRET_NAME="arqh-local-tls"
+TLS_DIR="$ROOT_DIR/.tmp/k8s/tls"
+INFRA_VENV="$ROOT_DIR/.tmp/infra-venv"
+
+INGRESS_NGINX_VERSION="controller-v1.11.1"
+METRICS_SERVER_VERSION="v0.7.2"
+
+API_IMAGE="arqh-api:local"
+WORKER_IMAGE="arqh-worker:local"
+WEB_IMAGE="arqh-web:local"
+
 log()  { printf '\033[1;34m[platform]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*"; }
 err()  { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; }
 
-# ---- Tool requirement helper ----
 require() {
   local tool="$1" hint="${2:-}"
   if ! command -v "$tool" >/dev/null 2>&1; then
@@ -38,13 +50,85 @@ require() {
   return 0
 }
 
-# ---- Commands ----------------------------------------------------
+get_env() {
+  local key="$1" default="${2:-}" val=""
+  if [ -f "$ENV_FILE" ]; then
+    val="$(awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }' "$ENV_FILE")"
+  fi
+  printf '%s' "${val:-$default}"
+}
+
+port_in_use() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  elif command -v nc >/dev/null 2>&1; then
+    nc -z 127.0.0.1 "$port" >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+cluster_exists() {
+  local cluster
+  while IFS= read -r cluster; do
+    if [ "$cluster" = "$KIND_CLUSTER_NAME" ]; then
+      return 0
+    fi
+  done < <(kind get clusters 2>/dev/null || true)
+  return 1
+}
+
+wait_for_rollout() {
+  local resource="$1"
+  kubectl -n "$K8S_NAMESPACE" rollout status "$resource" --timeout=240s
+}
+
+ensure_namespace() {
+  kubectl create namespace "$K8S_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+}
 
 cmd_preflight() {
-  log "Running preflight checks..."
+  log "Running Kubernetes preflight checks..."
   local ok=0
 
   require docker "Install Docker Desktop (macOS/Windows) or Docker Engine (Linux): https://docs.docker.com/get-docker/" || ok=1
+  require kind "Install kind: https://kind.sigs.k8s.io/" || ok=1
+  require kubectl "Install kubectl: https://kubernetes.io/docs/tasks/tools/" || ok=1
+  require helm "Install Helm: https://helm.sh/docs/intro/install/" || ok=1
+  require curl "Install curl (used for health and ingress probes)" || ok=1
+  require openssl "Install OpenSSL (used to create the local TLS cert)" || ok=1
+  require python3 "Install Python 3 (used for pytest infra smoke tests)" || ok=1
+
+  if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
+    err "Docker daemon is not running — start Docker Desktop / the docker service and retry"
+    ok=1
+  fi
+  if command -v python3 >/dev/null 2>&1 && ! python3 -m pip --version >/dev/null 2>&1; then
+    err "python3 -m pip is unavailable — install pip for Python 3 and retry"
+    ok=1
+  fi
+
+  if cluster_exists; then
+    log "kind cluster '$KIND_CLUSTER_NAME' already exists — skipping ingress port availability check"
+  else
+    cmd_check_cluster_ports || ok=1
+  fi
+
+  if [ "$ok" -eq 0 ]; then
+    log "Preflight OK ✅"
+  else
+    err "Preflight failed — resolve the issues above and re-run"
+    return 1
+  fi
+}
+
+cmd_compose_preflight() {
+  log "Running Docker Compose preflight checks..."
+  local ok=0
+
+  require docker "Install Docker Desktop (macOS/Windows) or Docker Engine (Linux): https://docs.docker.com/get-docker/" || ok=1
+  require curl "Install curl (used for the compose smoke health probe)" || ok=1
 
   if command -v docker >/dev/null 2>&1; then
     if docker compose version >/dev/null 2>&1; then
@@ -59,66 +143,44 @@ cmd_preflight() {
     fi
   fi
 
-  require curl "Install curl (used for the smoke health probe)" || ok=1
-
   if [ "$ok" -eq 0 ]; then
-    log "Preflight OK ✅"
+    log "Compose preflight OK ✅"
   else
-    err "Preflight failed — resolve the issues above and re-run"
+    err "Compose preflight failed — resolve the issues above and re-run"
     return 1
   fi
 }
 
-cmd_env() {
-  if [ ! -f "$ENV_FILE" ]; then
-    cp .env.docker.example "$ENV_FILE"
-    log "Created $ENV_FILE from .env.docker.example"
-  else
-    log "$ENV_FILE already exists — leaving as-is"
-  fi
-  if [ ! -f ".env" ]; then
-    cp .env.example .env
-    log "Created .env from .env.example"
-  else
-    log ".env already exists — leaving as-is"
-  fi
-}
-
-cmd_up() {
-  local debug=0
-  for arg in "$@"; do
-    [ "$arg" = "--debug" ] && debug=1
-  done
-
-  cmd_preflight
-  cmd_env
-  cmd_check_ports "$debug"
-
-  local -a compose_files=(-f "$COMPOSE_FILE")
-  if [ "$debug" -eq 1 ]; then
-    compose_files+=(-f "$DEBUG_COMPOSE_FILE")
-    log "Debug mode: also publishing redis/mongo/prometheus/loki to the host"
-  fi
-
-  log "Building images and starting the stack (api, worker, web, redis, mongo + monitoring)..."
-  docker compose --env-file "$ENV_FILE" "${compose_files[@]}" up --build -d --remove-orphans
-  cmd_smoke
-  log "Stack is up. Web UI: http://localhost:$(get_env WEB_PORT 5173)  |  Grafana: http://localhost:$(get_env GRAFANA_PORT 3001)"
-}
-
-# Check that the host-published ports are free before we try to bind them.
-# Prevents the cryptic "address already in use" failure mid-startup.
-cmd_check_ports() {
-  local debug="${1:-0}"
-  log "Checking host port availability..."
+cmd_check_cluster_ports() {
+  log "Checking host ports for kind ingress..."
   local conflict=0
 
-  # var:default:label — only ports we actually publish to the host.
+  for port in 80 443; do
+    if port_in_use "$port"; then
+      err "Port $port is already in use (required for the kind ingress front door)."
+      echo "     -> free port $port or stop the conflicting service before continuing"
+      conflict=1
+    fi
+  done
+
+  if [ "$conflict" -ne 0 ]; then
+    err "Resolve the ingress port conflict(s) above and re-run."
+    return 1
+  fi
+
+  log "Ingress ports available ✅"
+}
+
+cmd_check_compose_ports() {
+  local debug="${1:-0}"
+  log "Checking host port availability for compose..."
+  local conflict=0
   local -a checks=(
     "PORT:4000:API"
     "WEB_PORT:5173:Web UI"
     "GRAFANA_PORT:3001:Grafana"
   )
+
   if [ "$debug" -eq 1 ]; then
     checks+=(
       "REDIS_PUBLISH_PORT:6379:Redis (debug)"
@@ -140,65 +202,262 @@ cmd_check_ports() {
   done
 
   if [ "$conflict" -ne 0 ]; then
-    err "Resolve the port conflict(s) above and re-run. (Tip: \`lsof -nP -iTCP:<port> -sTCP:LISTEN\` shows the owner.)"
+    err "Resolve the port conflict(s) above and re-run."
     return 1
   fi
-  log "Host ports available ✅"
+
+  log "Compose host ports available ✅"
 }
 
-# Return 0 if a TCP port is currently listening on localhost.
-port_in_use() {
-  local port="$1"
-  if command -v lsof >/dev/null 2>&1; then
-    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
-  elif command -v nc >/dev/null 2>&1; then
-    nc -z 127.0.0.1 "$port" >/dev/null 2>&1
+cmd_env() {
+  if [ ! -f "$ENV_FILE" ]; then
+    cp .env.docker.example "$ENV_FILE"
+    log "Created $ENV_FILE from .env.docker.example"
   else
-    return 1  # no tool to check with — assume free
+    log "$ENV_FILE already exists — leaving as-is"
+  fi
+
+  if [ ! -f ".env" ]; then
+    cp .env.example .env
+    log "Created .env from .env.example"
+  else
+    log ".env already exists — leaving as-is"
   fi
 }
 
-cmd_down() {
-  log "Stopping the stack..."
-  # Reference both files so 'down' cleans up regardless of how it was started.
-  docker compose -f "$COMPOSE_FILE" -f "$DEBUG_COMPOSE_FILE" down --remove-orphans "$@"
+cmd_cluster() {
+  if cluster_exists; then
+    log "kind cluster '$KIND_CLUSTER_NAME' already exists — reusing it"
+    return 0
+  fi
+
+  log "Creating kind cluster from $KIND_CONFIG ..."
+  kind create cluster --name "$KIND_CLUSTER_NAME" --config "$KIND_CONFIG"
+  log "kind cluster created ✅"
 }
 
-cmd_smoke() {
-  local port url
-  port="$(get_env PORT 4000)"
-  url="http://127.0.0.1:${port}/api/health"
-  log "Waiting for API health at $url ..."
-  for _ in $(seq 1 45); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
-      log "API healthy ✅"
-      curl -fsS "$url"; echo
+install_metrics_server() {
+  log "Installing metrics-server (${METRICS_SERVER_VERSION}) ..."
+  kubectl apply -f "https://github.com/kubernetes-sigs/metrics-server/releases/download/${METRICS_SERVER_VERSION}/components.yaml" >/dev/null
+
+  local args
+  args="$(kubectl -n kube-system get deployment metrics-server -o jsonpath='{.spec.template.spec.containers[0].args}' 2>/dev/null || true)"
+  if [[ "$args" != *"--kubelet-insecure-tls"* ]]; then
+    kubectl -n kube-system patch deployment metrics-server --type=json \
+      -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' >/dev/null
+  fi
+
+  kubectl -n kube-system rollout status deployment/metrics-server --timeout=240s
+  log "metrics-server ready ✅"
+}
+
+install_ingress_nginx() {
+  log "Installing ingress-nginx (${INGRESS_NGINX_VERSION}) ..."
+  kubectl apply -f "https://raw.githubusercontent.com/kubernetes/ingress-nginx/${INGRESS_NGINX_VERSION}/deploy/static/provider/kind/deploy.yaml" >/dev/null
+  kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=240s
+  log "ingress-nginx ready ✅"
+}
+
+ensure_tls_secret() {
+  mkdir -p "$TLS_DIR"
+
+  local cert_file="$TLS_DIR/tls.crt"
+  local key_file="$TLS_DIR/tls.key"
+
+  if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ]; then
+    log "Generating self-signed TLS cert for $INGRESS_HOST ..."
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+      -keyout "$key_file" \
+      -out "$cert_file" \
+      -subj "/CN=${INGRESS_HOST}" \
+      -addext "subjectAltName=DNS:${INGRESS_HOST}" >/dev/null 2>&1
+  fi
+
+  kubectl -n "$K8S_NAMESPACE" create secret tls "$TLS_SECRET_NAME" \
+    --cert="$cert_file" \
+    --key="$key_file" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+  log "TLS secret ready ✅"
+}
+
+cmd_deps() {
+  ensure_namespace
+  install_metrics_server
+  install_ingress_nginx
+  ensure_tls_secret
+}
+
+build_local_images() {
+  log "Building local Docker images for kind ..."
+  docker build -f apps/api/Dockerfile -t "$API_IMAGE" .
+  docker build -f apps/api/Dockerfile.worker -t "$WORKER_IMAGE" .
+  docker build -f apps/web/Dockerfile -t "$WEB_IMAGE" .
+}
+
+load_images_into_kind() {
+  log "Loading local images into kind ..."
+  kind load docker-image "$API_IMAGE" --name "$KIND_CLUSTER_NAME"
+  kind load docker-image "$WORKER_IMAGE" --name "$KIND_CLUSTER_NAME"
+  kind load docker-image "$WEB_IMAGE" --name "$KIND_CLUSTER_NAME"
+}
+
+wait_for_workloads() {
+  wait_for_rollout deployment/"${RELEASE_NAME}-api"
+  wait_for_rollout deployment/"${RELEASE_NAME}-worker"
+  wait_for_rollout deployment/"${RELEASE_NAME}-web"
+  wait_for_rollout statefulset/"${RELEASE_NAME}-redis"
+  wait_for_rollout statefulset/"${RELEASE_NAME}-mongo"
+}
+
+cmd_deploy() {
+  ensure_namespace
+  build_local_images
+  load_images_into_kind
+
+  log "Deploying Helm release ${RELEASE_NAME} into namespace ${K8S_NAMESPACE} ..."
+  helm upgrade --install "$RELEASE_NAME" "$CHART_DIR" \
+    --namespace "$K8S_NAMESPACE" \
+    --create-namespace \
+    --set ingress.host="$INGRESS_HOST" \
+    --set ingress.tls.secretName="$TLS_SECRET_NAME"
+
+  wait_for_workloads
+  log "Helm deployment ready ✅"
+}
+
+wait_for_ingress_health() {
+  local url="https://${INGRESS_HOST}/api/health"
+  log "Waiting for ingress health at $url ..."
+
+  for _ in $(seq 1 60); do
+    if curl -sk --resolve "${INGRESS_HOST}:443:127.0.0.1" "$url" >/dev/null 2>&1; then
+      log "Ingress health is green ✅"
+      curl -sk --resolve "${INGRESS_HOST}:443:127.0.0.1" "$url"
+      echo
       return 0
     fi
     sleep 2
   done
-  err "API did not become healthy in time. Recent status:"
+
+  err "Ingress health did not become green in time."
+  kubectl get pods,svc,ingress,hpa -n "$K8S_NAMESPACE" || true
+  return 1
+}
+
+# Run the infra suite from an isolated venv so we never touch system Python
+# (avoids PEP 668 "externally-managed" errors and needs no global pytest).
+cmd_smoke() {
+  wait_for_ingress_health
+
+  if [ ! -x "$INFRA_VENV/bin/python" ]; then
+    log "Creating Python venv for infra tests at $INFRA_VENV ..."
+    python3 -m venv "$INFRA_VENV"
+  fi
+
+  log "Installing infra test dependencies ..."
+  "$INFRA_VENV/bin/python" -m pip install --quiet --upgrade pip
+  "$INFRA_VENV/bin/python" -m pip install --quiet -r tests/infra/requirements.txt
+
+  log "Running infra tests through the ingress ..."
+  INGRESS_HOST="$INGRESS_HOST" \
+  K8S_NAMESPACE="$K8S_NAMESPACE" \
+  RELEASE_NAME="$RELEASE_NAME" \
+  KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}" \
+  "$INFRA_VENV/bin/python" -m pytest tests/infra -v
+}
+
+cmd_up() {
+  cmd_preflight
+  cmd_env
+  cmd_cluster
+  cmd_deps
+  cmd_deploy
+  cmd_smoke
+  log "Platform is green. Ingress: https://${INGRESS_HOST}"
+}
+
+cmd_down() {
+  log "Tearing down Helm release and kind cluster..."
+  helm uninstall "$RELEASE_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1 || true
+  kind delete cluster --name "$KIND_CLUSTER_NAME" >/dev/null 2>&1 || true
+  log "Cluster teardown complete ✅"
+}
+
+cmd_logs() {
+  local component="${1:-api}"
+  case "$component" in
+    api|worker|web)
+      kubectl -n "$K8S_NAMESPACE" logs deployment/"${RELEASE_NAME}-${component}" -f
+      ;;
+    redis|mongo)
+      kubectl -n "$K8S_NAMESPACE" logs statefulset/"${RELEASE_NAME}-${component}" -f
+      ;;
+    *)
+      err "Unknown component: $component"
+      echo "     -> choose one of: api, worker, web, redis, mongo"
+      return 1
+      ;;
+  esac
+}
+
+cmd_ps() {
+  kubectl get pods,svc,ingress,hpa,deploy,statefulset -n "$K8S_NAMESPACE"
+}
+
+cmd_compose_up() {
+  local debug=0
+  for arg in "$@"; do
+    [ "$arg" = "--debug" ] && debug=1
+  done
+
+  cmd_compose_preflight
+  cmd_env
+  cmd_check_compose_ports "$debug"
+
+  local -a compose_files=(-f "$COMPOSE_FILE")
+  if [ "$debug" -eq 1 ]; then
+    compose_files+=(-f "$DEBUG_COMPOSE_FILE")
+    log "Debug mode: also publishing redis/mongo/prometheus/loki to the host"
+  fi
+
+  log "Building images and starting the compose stack ..."
+  docker compose --env-file "$ENV_FILE" "${compose_files[@]}" up --build -d --remove-orphans
+  cmd_compose_smoke
+  log "Compose stack is up. Web UI: http://localhost:$(get_env WEB_PORT 5173)  |  Grafana: http://localhost:$(get_env GRAFANA_PORT 3001)"
+}
+
+cmd_compose_smoke() {
+  local port url
+  port="$(get_env PORT 4000)"
+  url="http://127.0.0.1:${port}/api/health"
+  log "Waiting for compose API health at $url ..."
+  for _ in $(seq 1 45); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      log "Compose API healthy ✅"
+      curl -fsS "$url"
+      echo
+      return 0
+    fi
+    sleep 2
+  done
+
+  err "Compose API did not become healthy in time. Recent status:"
   docker compose -f "$COMPOSE_FILE" ps || true
   return 1
 }
 
-cmd_logs() {
+cmd_compose_down() {
+  log "Stopping the compose stack..."
+  docker compose -f "$COMPOSE_FILE" -f "$DEBUG_COMPOSE_FILE" down --remove-orphans "$@"
+}
+
+cmd_compose_logs() {
   docker compose -f "$COMPOSE_FILE" logs -f "$@"
 }
 
-cmd_ps() {
+cmd_compose_ps() {
   docker compose -f "$COMPOSE_FILE" ps "$@"
-}
-
-# ---- Helpers ----------------------------------------------------
-
-# Read KEY from .env.docker, falling back to a default.
-get_env() {
-  local key="$1" default="${2:-}" val=""
-  if [ -f "$ENV_FILE" ]; then
-    val="$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | head -n1 | cut -d= -f2- || true)"
-  fi
-  printf '%s' "${val:-$default}"
 }
 
 usage() {
@@ -207,33 +466,57 @@ Arqh Platform Control Script
 
 Usage: ./run-platform.sh <command>
 
-Commands:
-  preflight    Check required tooling (docker, compose plugin, daemon, curl)
-  env          Create .env / .env.docker from the tracked examples if missing
-  up           Preflight + build + start the full stack, then wait for green
-               (add --debug to also publish redis/mongo/prometheus/loki)
-  bootstrap    Alias for 'up'
-  smoke        Probe /api/health until the API is healthy
-  down         Stop the stack (pass -v to also remove volumes)
-  logs         Tail service logs (optionally a service name, e.g. logs api)
-  ps           Show container status
-  help         Show this message
+Submission-default Kubernetes commands:
+  preflight      Check required tooling (docker, kind, kubectl, helm, curl, openssl, python3)
+  env            Create .env / .env.docker from the tracked examples if missing
+  cluster        Create the local kind cluster from infra/kind/kind-cluster.yaml
+  deps           Install metrics-server, ingress-nginx, and the local TLS secret
+  deploy         Build local images, load them into kind, and helm upgrade/install the release
+  smoke          Wait for ingress health, then run pytest tests/infra -v
+  up             Preflight -> env -> cluster -> deps -> deploy -> smoke
+  bootstrap      Alias for 'up'
+  down           Helm uninstall + kind delete cluster
+  logs [name]    Tail logs for api|worker|web|redis|mongo (default: api)
+  ps             Show pods, services, ingress, HPA, deployments, and statefulsets
+
+Fallback Docker Compose commands:
+  compose-preflight  Check docker / compose prerequisites for the old baseline
+  compose-up         Build + start the compose stack (add --debug for extra published ports)
+  compose-smoke      Probe the compose API health endpoint until green
+  compose-down       Stop the compose stack (pass -v to also remove volumes)
+  compose-logs       Tail compose service logs
+  compose-ps         Show compose container status
 EOF
 }
 
 main() {
   local cmd="${1:-help}"
   shift || true
+
   case "$cmd" in
-    preflight)     cmd_preflight "$@" ;;
-    env)           cmd_env "$@" ;;
-    up|bootstrap)  cmd_up "$@" ;;
-    smoke)         cmd_smoke "$@" ;;
-    down)          cmd_down "$@" ;;
-    logs)          cmd_logs "$@" ;;
-    ps)            cmd_ps "$@" ;;
-    help|-h|--help) usage ;;
-    *) err "Unknown command: $cmd"; echo; usage; return 1 ;;
+    preflight)        cmd_preflight "$@" ;;
+    env)              cmd_env "$@" ;;
+    cluster)          cmd_cluster "$@" ;;
+    deps)             cmd_deps "$@" ;;
+    deploy)           cmd_deploy "$@" ;;
+    smoke)            cmd_smoke "$@" ;;
+    up|bootstrap)     cmd_up "$@" ;;
+    down)             cmd_down "$@" ;;
+    logs)             cmd_logs "$@" ;;
+    ps)               cmd_ps "$@" ;;
+    compose-preflight) cmd_compose_preflight "$@" ;;
+    compose-up)       cmd_compose_up "$@" ;;
+    compose-smoke)    cmd_compose_smoke "$@" ;;
+    compose-down)     cmd_compose_down "$@" ;;
+    compose-logs)     cmd_compose_logs "$@" ;;
+    compose-ps)       cmd_compose_ps "$@" ;;
+    help|-h|--help)   usage ;;
+    *)
+      err "Unknown command: $cmd"
+      echo
+      usage
+      return 1
+      ;;
   esac
 }
 
