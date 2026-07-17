@@ -97,6 +97,7 @@ const main = async () => {
     container.resultsConsumer.stop();
     server.close();
     await Promise.all([
+      container.realtimeGateway.stop(),
       disconnectRedis(),
       disconnectMongo(),
       container.streamRedis.quit(),

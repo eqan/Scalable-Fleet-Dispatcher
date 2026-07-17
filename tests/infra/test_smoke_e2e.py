@@ -148,30 +148,78 @@ def test_sse_stream_emits_state_change_events(
     http: requests.Session,
     base_url: str,
 ) -> None:
+    """SSE must survive multi-replica routing: stream on one pod, mutate on another.
+
+    Important: consume the SSE body with a *single* ``iter_lines()`` loop.
+    Calling ``iter_lines()`` twice on the same response exhausts the first
+    iterator and makes the second see an empty/closed stream under requests.
+    """
     order_id = f"infra-sse-{uuid.uuid4().hex[:8]}"
 
-    with http.get(
-        f"{base_url}/api/events",
-        stream=True,
-        timeout=(5, 25),
-        headers={"Accept": "text/event-stream"},
-    ) as response:
-        assert response.status_code == 200
+    # Dedicated session so the mutation's short-lived connection cannot recycle
+    # the long-lived SSE socket out of a shared urllib3 pool.
+    sse = requests.Session()
+    sse.verify = False
 
-        # Trigger a mutation so the gateway broadcasts an event to our stream.
-        assert _post(http, base_url, "/api/orders", {
-            "id": order_id,
-            "weight_kg": 15,
-            "location": {"lat": 40.7410, "lng": -73.9897},
-            "service_time_min": 10,
-        }).status_code == 201
+    try:
+        with sse.get(
+            f"{base_url}/api/events",
+            stream=True,
+            timeout=(5, 45),
+            headers={"Accept": "text/event-stream"},
+        ) as response:
+            assert response.status_code == 200
 
-        try:
-            payload = _next_state_change(response, deadline=time.time() + 20)
-            assert payload is not None, "did not receive a state_changed SSE event"
-            assert payload["kind"] in STATE_CHANGE_KINDS
-        finally:
-            _delete_at_current_rev(http, base_url, f"/api/orders/{order_id}")
+            event_name: Optional[str] = None
+            data: list[str] = []
+            connected = False
+            payload: Optional[dict] = None
+            deadline = time.time() + 30
+
+            try:
+                for raw in response.iter_lines(decode_unicode=True):
+                    if time.time() > deadline:
+                        break
+
+                    line = (raw or "").rstrip("\r")
+                    if line == "":
+                        if event_name == "state_changed" and data:
+                            payload = json.loads("\n".join(data))
+                            break
+                        event_name, data = None, []
+                        continue
+
+                    if line.startswith("event:"):
+                        event_name = line[len("event:"):].strip()
+                        continue
+
+                    if line.startswith("data:"):
+                        chunk = line[len("data:"):].strip()
+                        data.append(chunk)
+                        if connected:
+                            continue
+                        try:
+                            hello = json.loads(chunk)
+                        except json.JSONDecodeError:
+                            continue
+                        if hello.get("type") != "connected":
+                            continue
+                        connected = True
+                        assert _post(http, base_url, "/api/orders", {
+                            "id": order_id,
+                            "weight_kg": 15,
+                            "location": {"lat": 40.7410, "lng": -73.9897},
+                            "service_time_min": 10,
+                        }).status_code == 201
+
+                assert connected, "SSE stream never sent the connected frame"
+                assert payload is not None, "did not receive a state_changed SSE event"
+                assert payload["kind"] in STATE_CHANGE_KINDS
+            finally:
+                if connected:
+                    _delete_at_current_rev(http, base_url, f"/api/orders/{order_id}")
+    finally:
+        sse.close()
 
 
 def test_metrics_are_not_exposed_through_ingress(http: requests.Session, base_url: str) -> None:
