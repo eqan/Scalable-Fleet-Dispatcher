@@ -8,10 +8,6 @@ import { logger } from "../../shared/logger.ts";
 import { env } from "../../config/env.ts";
 import { STREAM_KEYS } from "../../config/redis-keys.ts";
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-
 interface QueuedSseEvent {
   id: string;
   payload: string;
@@ -25,43 +21,30 @@ interface SseClientState {
   queue: QueuedSseEvent[];
 }
 
-/**
- * Compare two Redis Stream IDs numerically (`<ms>-<seq>`).
- * Returns -1 if a < b, 0 if equal, 1 if a > b.
- */
 function compareStreamIds(a: string, b: string): number {
-  const [rawMsA, rawSeqA] = a.split("-");
-  const [rawMsB, rawSeqB] = b.split("-");
+  const parse = (id: string): [number, number] => {
+    const [msPart, seqPart] = id.split("-");
+    const ms = Number(msPart);
+    const seq = Number(seqPart);
+    return [Number.isFinite(ms) ? ms : 0, Number.isFinite(seq) ? seq : 0];
+  };
 
-  const msA = Number.isFinite(Number(rawMsA)) ? Number(rawMsA) : 0;
-  const seqA = Number.isFinite(Number(rawSeqA)) ? Number(rawSeqA) : 0;
-  const msB = Number.isFinite(Number(rawMsB)) ? Number(rawMsB) : 0;
-  const seqB = Number.isFinite(Number(rawSeqB)) ? Number(rawSeqB) : 0;
-
-  if (msA !== msB) return msA < msB ? -1 : 1;
-  if (seqA !== seqB) return seqA < seqB ? -1 : 1;
+  const [leftMs, leftSeq] = parse(a);
+  const [rightMs, rightSeq] = parse(b);
+  if (leftMs !== rightMs) return leftMs < rightMs ? -1 : 1;
+  if (leftSeq !== rightSeq) return leftSeq < rightSeq ? -1 : 1;
   return 0;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Gateway                                                            */
-/* ------------------------------------------------------------------ */
-
 /**
- * Server-Sent Events gateway backed by a capped Redis Stream for replay and
- * Redis Pub/Sub for live fan-out across API replicas.
- *
- * Why pub/sub: with `api.replicaCount >= 2`, an SSE client may land on pod A
- * while a mutation hits pod B. In-memory broadcast alone would miss that client.
- * Every replica publishes to `sse:live` after XADD; every replica's subscriber
- * writes to its local SSE sockets.
+ * SSE gateway: Redis Stream for Last-Event-ID replay + Pub/Sub (`sse:live`)
+ * so every API replica can fan out live events (needed with replicaCount >= 2).
  */
 export class SseGateway implements IRealtimeGateway {
-  /** Hard cap on concurrent SSE connections to prevent resource exhaustion. */
   private static readonly MAX_CLIENTS = 256;
 
   private clients = new Map<string, SseClientState>();
-  /** Dedicated connection — SUBSCRIBE mode blocks other commands on the socket. */
+  /** Separate connection — SUBSCRIBE mode cannot share the main Redis socket. */
   private readonly subRedis: Redis;
   private started = false;
 
@@ -88,7 +71,7 @@ export class SseGateway implements IRealtimeGateway {
     try {
       await this.subRedis.unsubscribe(STREAM_KEYS.sseLive);
     } catch {
-      // ignore — shutting down
+      // shutting down
     }
     try {
       await this.subRedis.quit();
@@ -98,7 +81,6 @@ export class SseGateway implements IRealtimeGateway {
   }
 
   addClient(req: Request, res: Response): void {
-    // Guard: prevent connection-exhaustion DoS
     if (this.clients.size >= SseGateway.MAX_CLIENTS) {
       logger.warn({ total: this.clients.size }, "SSE connection limit reached");
       res.status(503).json({ code: "SSE_LIMIT", message: "Too many connections" });
@@ -107,30 +89,25 @@ export class SseGateway implements IRealtimeGateway {
 
     const clientId = crypto.randomUUID();
 
-    // SSE headers
     res.set({
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
-      "X-Accel-Buffering": "no", // disable nginx buffering
+      "X-Accel-Buffering": "no",
     });
     res.flushHeaders();
 
-    // Sanitise Last-Event-ID: strip control chars (SSE / header injection)
     const rawLastId = req.headers["last-event-id"] as string | undefined;
     const lastEventId = rawLastId
       ? rawLastId.replace(/[\r\n\0]/g, "").slice(0, 64)
       : null;
 
-    // Reserve slot immediately so reconnecting clients count toward MAX_CLIENTS
-    // and can buffer live events while replay runs.
     this.clients.set(clientId, {
       res,
       ready: lastEventId === null,
       queue: [],
     });
 
-    // Cleanup on disconnect
     req.on("close", () => {
       this.clients.delete(clientId);
       logger.debug(
@@ -140,26 +117,22 @@ export class SseGateway implements IRealtimeGateway {
     });
 
     if (lastEventId !== null) {
-      // Replay path: while replay runs, broadcasts are queued for this client.
-      // After replay, we drain the queue in ID order and then flip to live mode.
       void this.replayThenActivate(lastEventId, clientId);
-    } else {
-      // Fresh connection: register immediately
-      res.write(
-        `data: ${JSON.stringify({ type: "connected", clientId, lastEventId })}\n\n`,
-      );
-      logger.debug(
-        { clientId, total: this.clients.size },
-        "SSE client connected",
-      );
+      return;
     }
+
+    res.write(
+      `data: ${JSON.stringify({ type: "connected", clientId, lastEventId })}\n\n`,
+    );
+    logger.debug(
+      { clientId, total: this.clients.size },
+      "SSE client connected",
+    );
   }
 
   broadcast(event: StateChangeEvent): void {
     const serialized = JSON.stringify(event);
 
-    // Persist to Redis Stream (capped at SSE_REPLAY_BUFFER_SIZE)
-    // XADD returns the auto-generated stream ID which we use as the SSE id
     void this.redis
       .xadd(
         STREAM_KEYS.sseReplay,
@@ -180,10 +153,9 @@ export class SseGateway implements IRealtimeGateway {
           `event: state_changed`,
           `data: ${serialized}`,
           "",
-          "", // trailing newline per SSE spec
+          "",
         ].join("\n");
 
-        // Fan out to every API replica (including this one) via Pub/Sub.
         await this.redis.publish(STREAM_KEYS.sseLive, payload);
       })
       .catch((err: unknown) => {
@@ -195,9 +167,7 @@ export class SseGateway implements IRealtimeGateway {
     return this.clients.size;
   }
 
-  /** Apply a published SSE frame to local sockets (and replay queues). */
   private deliverLivePayload(payload: string): void {
-    // Extract stream id for queue dedupe (line: `id: <streamId>`).
     const idLine = payload.split("\n").find((line) => line.startsWith("id:"));
     const streamId = idLine ? idLine.slice(3).trim() : "";
 
@@ -214,13 +184,8 @@ export class SseGateway implements IRealtimeGateway {
     }
   }
 
-  /* ------------------------------------------------------------------ */
-  /*  Replay then activate (ordered + no-gap delivery guarantee)         */
-  /* ------------------------------------------------------------------ */
-
   /**
-   * Replays missed events from Redis, drains events queued during replay,
-   * then flips the client to live mode.
+   * Replay missed stream events, drain anything queued during replay, then go live.
    */
   private async replayThenActivate(
     lastEventId: string,
@@ -299,14 +264,6 @@ export class SseGateway implements IRealtimeGateway {
     logger.debug({ clientId, total: this.clients.size }, "SSE client connected (after replay)");
   }
 
-  /* ------------------------------------------------------------------ */
-  /*  Redis Stream replay                                                */
-  /* ------------------------------------------------------------------ */
-
-  /**
-   * Replay all events from the Redis Stream after the given stream ID.
-   * If the ID is too old (not in stream), emit a `missed_events` advisory.
-   */
   private async replayFromStream(
     lastEventId: string,
     clientId: string,
