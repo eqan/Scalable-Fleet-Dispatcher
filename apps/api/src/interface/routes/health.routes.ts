@@ -16,6 +16,7 @@ export const createHealthRoutes = (deps: {
   const router = Router();
   const controller = createHealthController(deps);
 
+  router.get("/live", controller.live);
   router.get("/health", controller.check);
 
   return router;

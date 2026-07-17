@@ -1,4 +1,5 @@
-FROM oven/bun:1 AS base
+ARG BUN_IMAGE=oven/bun:1
+FROM ${BUN_IMAGE} AS base
 WORKDIR /app
 
 # Copy workspace root config
@@ -24,7 +25,7 @@ COPY apps/api/data apps/api/data/
 # Run as non-root user (least-privilege principle)
 USER bun
 
-EXPOSE ${PORT:-4000}
+EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
   CMD bun -e "fetch('http://127.0.0.1:' + (process.env.PORT || '4000') + '/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 WORKDIR /app/apps/api

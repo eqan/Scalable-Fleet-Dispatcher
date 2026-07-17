@@ -1,17 +1,27 @@
 {
   "name": "arqh",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "dev:api": "bun run --cwd apps/api dev",
     "dev:web": "bun run --cwd apps/web dev",
     "dev:worker": "bun run --cwd apps/api worker",
     "build:web": "bun run --cwd apps/web build",
+    "lint": "bun run lint:web",
+    "lint:web": "bun run --cwd apps/web lint",
+    "format:check": "bunx prettier --check \"README.md\" \"docs/**/*.md\" \".github/workflows/*.yml\" \"*.json\" \"apps/*/package.json\" \"infra/kind/*.yaml\" \"infra/helm/arqh-platform/Chart.yaml\" \"infra/helm/arqh-platform/values*.yaml\"",
+    "format": "bunx prettier --write \"README.md\" \"docs/**/*.md\" \".github/workflows/*.yml\" \"*.json\" \"apps/*/package.json\" \"infra/kind/*.yaml\" \"infra/helm/arqh-platform/Chart.yaml\" \"infra/helm/arqh-platform/values*.yaml\"",
     "typecheck": "bun run --cwd packages/shared typecheck && bun run --cwd apps/api typecheck && bun run --cwd apps/web typecheck",
     "test": "bun run --cwd apps/api test",
     "test:docker": "bun test ./apps/api/tests/integration-docker.ts"
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.5"
   }
 }

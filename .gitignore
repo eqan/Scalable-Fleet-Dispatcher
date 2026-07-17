@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 *.tsbuildinfo
+.tmp/
 
 # ---- Environment (secrets) ----
 # Ignore real env files, but keep the tracked templates + committed test config.
@@ -23,13 +24,23 @@ coverage/
 playwright-report/
 test-results/
 
+# ---- Rendered chart output (CI/local validation artifact) ----
+rendered.yaml
+
+# ---- Python cache ----
+__pycache__/
+*.py[cod]
+
 # ---- OS / editor ----
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+
+# -- Custom ---
 docs
 AGENTS.md
+.cursor
 
 # ---- Challenge brief (reference material, not a deliverable) ----
 challenge.txt

@@ -5,37 +5,64 @@
 SHELL := /usr/bin/env bash
 
 .DEFAULT_GOAL := help
-.PHONY: help bootstrap boostrap preflight env up down smoke logs ps test
+.PHONY: help bootstrap boostrap preflight env cluster deps deploy up down smoke logs ps test compose-preflight compose-up compose-down compose-smoke compose-logs compose-ps
 
 help: ## Show available targets
 	@./run-platform.sh help
 
-bootstrap: ## Preflight + build + start the full stack and wait for green
+bootstrap: ## Preflight + kind cluster + deps + deploy + infra smoke
 	@./run-platform.sh up
 
 # Common typo alias
 boostrap: bootstrap ## Alias for bootstrap (typo)
 
-preflight: ## Check required tooling
+preflight: ## Check Kubernetes bootstrap tooling
 	@./run-platform.sh preflight
 
 env: ## Create .env / .env.docker from examples if missing
 	@./run-platform.sh env
 
-up: ## Start the full stack
+cluster: ## Create the local kind cluster
+	@./run-platform.sh cluster
+
+deps: ## Install metrics-server, ingress-nginx, and the local TLS secret
+	@./run-platform.sh deps
+
+deploy: ## Build/load images and helm install the platform
+	@./run-platform.sh deploy
+
+up: ## Bring up the Kubernetes platform end-to-end
 	@./run-platform.sh up
 
-down: ## Stop the stack (use `make down ARGS=-v` to drop volumes)
-	@./run-platform.sh down $(ARGS)
+down: ## Helm uninstall + delete the kind cluster
+	@./run-platform.sh down
 
-smoke: ## Probe /api/health until healthy
+smoke: ## Run the Kubernetes infra smoke suite
 	@./run-platform.sh smoke
 
-logs: ## Tail logs (use `make logs ARGS=api` for one service)
+logs: ## Tail cluster logs (use `make logs ARGS=api`)
 	@./run-platform.sh logs $(ARGS)
 
-ps: ## Show container status
+ps: ## Show cluster workload status
 	@./run-platform.sh ps
 
 test: ## Run the API integration test suite (requires bun + local Redis/Mongo)
 	@bun run test
+
+compose-preflight: ## Check Docker Compose prerequisites
+	@./run-platform.sh compose-preflight
+
+compose-up: ## Start the old Docker Compose baseline
+	@./run-platform.sh compose-up $(ARGS)
+
+compose-down: ## Stop the old Docker Compose baseline
+	@./run-platform.sh compose-down $(ARGS)
+
+compose-smoke: ## Probe the old Docker Compose API health endpoint
+	@./run-platform.sh compose-smoke
+
+compose-logs: ## Tail Docker Compose logs
+	@./run-platform.sh compose-logs $(ARGS)
+
+compose-ps: ## Show Docker Compose container status
+	@./run-platform.sh compose-ps $(ARGS)
