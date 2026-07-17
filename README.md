@@ -276,11 +276,11 @@ User Action → Frontend (optimistic UI update)
 
 The bootstrap installs a separate Helm release from [`infra/helm/monitoring`](infra/helm/monitoring):
 
-| Component | Role |
-|-----------|------|
-| Prometheus Operator + Prometheus | Scrapes the API via a `ServiceMonitor` on ClusterIP `/metrics` |
-| Grafana | UI at `https://grafana.arqh.localtest.me` (sidecar-provisioned datasources/dashboards) |
-| Loki + Promtail | Pod log shipping; LogQL uses `{app="arqh-api"}` |
+| Component                        | Role                                                                                   |
+| -------------------------------- | -------------------------------------------------------------------------------------- |
+| Prometheus Operator + Prometheus | Scrapes the API via a `ServiceMonitor` on ClusterIP `/metrics`                         |
+| Grafana                          | UI at `https://grafana.arqh.localtest.me` (sidecar-provisioned datasources/dashboards) |
+| Loki + Promtail                  | Pod log shipping; LogQL uses `{app="arqh-api"}`                                        |
 
 `/api/health` also records `arqh_dependency_latency_ms` / `arqh_dependency_up` so dependency panels stay fresh without a separate probe loop.
 
@@ -304,7 +304,7 @@ The "Arqh API Overview" dashboard ships with 5 panels ready to use:
 | API Request Count by Route | `sum(rate(http_request_duration_ms_count[$__rate_interval])) by (route)`                     |
 | Error Rate per Route (5xx) | `sum(rate(http_request_duration_ms_count{status_code=~"5.."}[$__rate_interval])) by (route)` |
 | CPU & Memory Usage         | `rate(process_cpu_seconds_total[1m])` + `process_resident_memory_bytes`                      |
-| API Logs                   | Compose: `{service="api"} \| json` · K8s: `{app="arqh-api"} \| json` (Loki)     |
+| API Logs                   | Compose: `{service="api"} \| json` · K8s: `{app="arqh-api"} \| json` (Loki)                  |
 
 ### Log Aggregation (Loki + Promtail)
 
