@@ -27,6 +27,9 @@ test-results/
 # ---- Rendered chart output (CI/local validation artifact) ----
 rendered.yaml
 
+# Helm dependency packages are fetched by `helm dependency build` during bootstrap.
+infra/helm/monitoring/charts/
+
 # ---- Python cache ----
 __pycache__/
 *.py[cod]

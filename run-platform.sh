@@ -26,7 +26,14 @@ RELEASE_NAME="arqh"
 CHART_DIR="infra/helm/arqh-platform"
 INGRESS_HOST="${INGRESS_HOST:-arqh.localtest.me}"
 TLS_SECRET_NAME="arqh-local-tls"
+MONITORING_NAMESPACE="monitoring"
+MONITORING_RELEASE_NAME="monitoring"
+MONITORING_CHART_DIR="infra/helm/monitoring"
+GRAFANA_HOST="${GRAFANA_HOST:-grafana.arqh.localtest.me}"
+GRAFANA_TLS_SECRET_NAME="grafana-local-tls"
+GRAFANA_ADMIN_SECRET_NAME="grafana-admin"
 TLS_DIR="$ROOT_DIR/.tmp/k8s/tls"
+GRAFANA_CREDS_FILE="$ROOT_DIR/.tmp/k8s/grafana-admin.env"
 INFRA_VENV="$ROOT_DIR/.tmp/infra-venv"
 
 INGRESS_NGINX_VERSION="controller-v1.11.1"
@@ -258,34 +265,161 @@ install_ingress_nginx() {
   log "ingress-nginx ready ✅"
 }
 
-ensure_tls_secret() {
-  mkdir -p "$TLS_DIR"
+ensure_monitoring_namespace() {
+  kubectl create namespace "$MONITORING_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+}
 
-  local cert_file="$TLS_DIR/tls.crt"
-  local key_file="$TLS_DIR/tls.key"
+# Read KEY=VALUE where the value may itself contain '=' (e.g. base64 padding).
+read_env_value() {
+  local file="$1" key="$2"
+  sed -n "s/^${key}=//p" "$file" | head -n1
+}
+
+ensure_tls_secret_for_host() {
+  local namespace="$1"
+  local secret_name="$2"
+  local host="$3"
+  local host_dir="${TLS_DIR}/${host}"
+
+  mkdir -p "$host_dir"
+
+  local cert_file="$host_dir/tls.crt"
+  local key_file="$host_dir/tls.key"
 
   if [ ! -f "$cert_file" ] || [ ! -f "$key_file" ]; then
-    log "Generating self-signed TLS cert for $INGRESS_HOST ..."
+    log "Generating self-signed TLS cert for $host ..."
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
       -keyout "$key_file" \
       -out "$cert_file" \
-      -subj "/CN=${INGRESS_HOST}" \
-      -addext "subjectAltName=DNS:${INGRESS_HOST}" >/dev/null 2>&1
+      -subj "/CN=${host}" \
+      -addext "subjectAltName=DNS:${host}" >/dev/null 2>&1
   fi
 
-  kubectl -n "$K8S_NAMESPACE" create secret tls "$TLS_SECRET_NAME" \
+  kubectl -n "$namespace" create secret tls "$secret_name" \
     --cert="$cert_file" \
     --key="$key_file" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-  log "TLS secret ready ✅"
+  log "TLS secret ${secret_name} ready in namespace ${namespace} ✅"
+}
+
+ensure_tls_secret() {
+  ensure_tls_secret_for_host "$K8S_NAMESPACE" "$TLS_SECRET_NAME" "$INGRESS_HOST"
+}
+
+ensure_grafana_admin_secret() {
+  mkdir -p "$(dirname "$GRAFANA_CREDS_FILE")"
+
+  if [ ! -f "$GRAFANA_CREDS_FILE" ]; then
+    {
+      echo "admin-user=admin"
+      # Avoid '=' in the password so naive KEY=VALUE parsers elsewhere stay safe;
+      # still use sed -n 's/^key=//' when reading (base64 padding edge case).
+      printf 'admin-password=%s\n' "$(openssl rand -base64 32 | tr -d '\n=/+')"
+    } > "$GRAFANA_CREDS_FILE"
+    chmod 600 "$GRAFANA_CREDS_FILE"
+  fi
+
+  local admin_user admin_password
+  admin_user="$(read_env_value "$GRAFANA_CREDS_FILE" "admin-user")"
+  admin_password="$(read_env_value "$GRAFANA_CREDS_FILE" "admin-password")"
+
+  if [ -z "$admin_user" ] || [ -z "$admin_password" ]; then
+    err "Grafana credentials file is missing admin-user or admin-password: $GRAFANA_CREDS_FILE"
+    return 1
+  fi
+
+  kubectl -n "$MONITORING_NAMESPACE" create secret generic "$GRAFANA_ADMIN_SECRET_NAME" \
+    --from-literal=admin-user="$admin_user" \
+    --from-literal=admin-password="$admin_password" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+  log "Grafana admin secret ready (creds in ${GRAFANA_CREDS_FILE}) ✅"
+}
+
+apply_monitoring_grafana_assets() {
+  local datasources_file="packages/monitoring/grafana/provisioning/datasources/datasources-k8s.yml"
+  local -a dashboards=(
+    "api-overview.json"
+    "platform-observability.json"
+  )
+
+  log "Applying Grafana datasources and dashboards ..."
+  kubectl -n "$MONITORING_NAMESPACE" create configmap monitoring-grafana-datasources \
+    --from-file=datasources.yaml="$datasources_file" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl -n "$MONITORING_NAMESPACE" label configmap monitoring-grafana-datasources \
+    grafana_datasource=1 --overwrite >/dev/null
+
+  local dashboard dashboard_name dashboard_path
+  for dashboard in "${dashboards[@]}"; do
+    dashboard_name="${dashboard%.json}"
+    dashboard_path="packages/monitoring/grafana/provisioning/dashboards/${dashboard}"
+    kubectl -n "$MONITORING_NAMESPACE" create configmap "monitoring-grafana-dashboard-${dashboard_name}" \
+      --from-file="${dashboard}=${dashboard_path}" \
+      --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    kubectl -n "$MONITORING_NAMESPACE" label configmap "monitoring-grafana-dashboard-${dashboard_name}" \
+      grafana_dashboard=1 --overwrite >/dev/null
+    kubectl -n "$MONITORING_NAMESPACE" annotate configmap "monitoring-grafana-dashboard-${dashboard_name}" \
+      grafana_folder=Arqh --overwrite >/dev/null
+  done
+}
+
+wait_for_monitoring_stack() {
+  kubectl -n "$MONITORING_NAMESPACE" rollout status deployment/monitoring-grafana --timeout=240s
+  kubectl -n "$MONITORING_NAMESPACE" rollout status deployment/monitoring-kube-state-metrics --timeout=240s
+  kubectl -n "$MONITORING_NAMESPACE" rollout status deployment/monitoring-kube-prometheus-operator --timeout=240s
+  kubectl -n "$MONITORING_NAMESPACE" rollout status statefulset/monitoring-loki --timeout=240s
+  kubectl -n "$MONITORING_NAMESPACE" rollout status daemonset/monitoring-promtail --timeout=240s
+
+  for _ in $(seq 1 60); do
+    if kubectl -n "$MONITORING_NAMESPACE" wait \
+      --for=condition=Ready \
+      pod \
+      -l operator.prometheus.io/name=monitoring-kube-prometheus-prometheus \
+      --timeout=5s >/dev/null 2>&1; then
+      log "Prometheus pod is ready ✅"
+      return 0
+    fi
+    sleep 2
+  done
+
+  err "Prometheus pod did not become ready in time."
+  kubectl get pods -n "$MONITORING_NAMESPACE" || true
+  return 1
+}
+
+install_monitoring_stack() {
+  ensure_monitoring_namespace
+  ensure_tls_secret_for_host "$MONITORING_NAMESPACE" "$GRAFANA_TLS_SECRET_NAME" "$GRAFANA_HOST"
+  ensure_grafana_admin_secret
+
+  log "Building monitoring chart dependencies ..."
+  helm dependency build "$MONITORING_CHART_DIR" >/dev/null
+
+  log "Installing monitoring stack into namespace ${MONITORING_NAMESPACE} ..."
+  helm upgrade --install "$MONITORING_RELEASE_NAME" "$MONITORING_CHART_DIR" \
+    --namespace "$MONITORING_NAMESPACE" \
+    --create-namespace \
+    --set "serviceMonitor.targetNamespace=${K8S_NAMESPACE}" \
+    --set "serviceMonitor.targetRelease=${RELEASE_NAME}" \
+    --set "kube-prometheus-stack.grafana.admin.existingSecret=${GRAFANA_ADMIN_SECRET_NAME}" \
+    --set "kube-prometheus-stack.grafana.ingress.hosts[0]=${GRAFANA_HOST}" \
+    --set "kube-prometheus-stack.grafana.ingress.tls[0].hosts[0]=${GRAFANA_HOST}" \
+    --set "kube-prometheus-stack.grafana.ingress.tls[0].secretName=${GRAFANA_TLS_SECRET_NAME}"
+
+  apply_monitoring_grafana_assets
+  wait_for_monitoring_stack
+  log "Monitoring stack ready ✅"
 }
 
 cmd_deps() {
   ensure_namespace
+  ensure_monitoring_namespace
   install_metrics_server
   install_ingress_nginx
   ensure_tls_secret
+  install_monitoring_stack
 }
 
 build_local_images() {
@@ -361,7 +495,9 @@ cmd_smoke() {
 
   log "Running infra tests through the ingress ..."
   INGRESS_HOST="$INGRESS_HOST" \
+  GRAFANA_HOST="$GRAFANA_HOST" \
   K8S_NAMESPACE="$K8S_NAMESPACE" \
+  MONITORING_NAMESPACE="$MONITORING_NAMESPACE" \
   RELEASE_NAME="$RELEASE_NAME" \
   KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}" \
   "$INFRA_VENV/bin/python" -m pytest tests/infra -v
@@ -374,11 +510,12 @@ cmd_up() {
   cmd_deps
   cmd_deploy
   cmd_smoke
-  log "Platform is green. Ingress: https://${INGRESS_HOST}"
+  log "Platform is green. App: https://${INGRESS_HOST}  |  Grafana: https://${GRAFANA_HOST}"
 }
 
 cmd_down() {
-  log "Tearing down Helm release and kind cluster..."
+  log "Tearing down monitoring + app Helm releases and kind cluster..."
+  helm uninstall "$MONITORING_RELEASE_NAME" -n "$MONITORING_NAMESPACE" >/dev/null 2>&1 || true
   helm uninstall "$RELEASE_NAME" -n "$K8S_NAMESPACE" >/dev/null 2>&1 || true
   kind delete cluster --name "$KIND_CLUSTER_NAME" >/dev/null 2>&1 || true
   log "Cluster teardown complete ✅"
@@ -393,16 +530,29 @@ cmd_logs() {
     redis|mongo)
       kubectl -n "$K8S_NAMESPACE" logs statefulset/"${RELEASE_NAME}-${component}" -f
       ;;
+    grafana)
+      kubectl -n "$MONITORING_NAMESPACE" logs deployment/monitoring-grafana -f
+      ;;
+    prometheus)
+      kubectl -n "$MONITORING_NAMESPACE" logs statefulset/prometheus-monitoring-kube-prometheus-prometheus -f
+      ;;
+    loki)
+      kubectl -n "$MONITORING_NAMESPACE" logs statefulset/monitoring-loki -f
+      ;;
     *)
       err "Unknown component: $component"
-      echo "     -> choose one of: api, worker, web, redis, mongo"
+      echo "     -> choose one of: api, worker, web, redis, mongo, grafana, prometheus, loki"
       return 1
       ;;
   esac
 }
 
 cmd_ps() {
+  echo "== app (${K8S_NAMESPACE}) =="
   kubectl get pods,svc,ingress,hpa,deploy,statefulset -n "$K8S_NAMESPACE"
+  echo
+  echo "== monitoring (${MONITORING_NAMESPACE}) =="
+  kubectl get pods,svc,ingress,deploy,statefulset,daemonset -n "$MONITORING_NAMESPACE"
 }
 
 cmd_compose_up() {
@@ -470,14 +620,14 @@ Submission-default Kubernetes commands:
   preflight      Check required tooling (docker, kind, kubectl, helm, curl, openssl, python3)
   env            Create .env / .env.docker from the tracked examples if missing
   cluster        Create the local kind cluster from infra/kind/kind-cluster.yaml
-  deps           Install metrics-server, ingress-nginx, and the local TLS secret
+  deps           Install metrics-server, ingress-nginx, monitoring stack, and local TLS secrets
   deploy         Build local images, load them into kind, and helm upgrade/install the release
   smoke          Wait for ingress health, then run pytest tests/infra -v
   up             Preflight -> env -> cluster -> deps -> deploy -> smoke
   bootstrap      Alias for 'up'
-  down           Helm uninstall + kind delete cluster
-  logs [name]    Tail logs for api|worker|web|redis|mongo (default: api)
-  ps             Show pods, services, ingress, HPA, deployments, and statefulsets
+  down           Uninstall monitoring + app releases, then kind delete cluster
+  logs [name]    Tail logs for api|worker|web|redis|mongo|grafana|prometheus|loki (default: api)
+  ps             Show app + monitoring workloads
 
 Fallback Docker Compose commands:
   compose-preflight  Check docker / compose prerequisites for the old baseline

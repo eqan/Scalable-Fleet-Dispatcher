@@ -1,0 +1,17 @@
+apiVersion: v2
+name: monitoring
+description: Arqh monitoring stack for local Kubernetes observability
+type: application
+version: 0.1.0
+appVersion: "1.0"
+
+dependencies:
+  - name: kube-prometheus-stack
+    version: 87.16.1
+    repository: https://prometheus-community.github.io/helm-charts
+  - name: loki
+    version: 7.1.0
+    repository: https://grafana.github.io/helm-charts
+  - name: promtail
+    version: 6.17.1
+    repository: https://grafana.github.io/helm-charts

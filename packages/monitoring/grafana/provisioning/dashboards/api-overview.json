@@ -203,7 +203,7 @@
       "datasource": { "type": "loki", "uid": "P8E80F9AEF21F6940" },
       "targets": [
         {
-          "expr": "{service=\"api\"} | json",
+          "expr": "{app=\"arqh-api\"} | json",
           "refId": "A"
         }
       ],

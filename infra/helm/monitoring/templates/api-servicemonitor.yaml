@@ -1,0 +1,24 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: arqh-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/instance: {{ .Values.serviceMonitor.targetRelease }}
+    app.kubernetes.io/part-of: arqh-platform
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/managed-by: Helm
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.serviceMonitor.targetNamespace }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api
+      app.kubernetes.io/instance: {{ .Values.serviceMonitor.targetRelease }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}

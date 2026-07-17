@@ -1,0 +1,197 @@
+serviceMonitor:
+  targetNamespace: arqh
+  targetRelease: arqh
+  interval: 15s
+  scrapeTimeout: 10s
+
+grafana:
+  host: grafana.arqh.localtest.me
+  tlsSecretName: grafana-local-tls
+  adminSecretName: grafana-admin
+
+kube-prometheus-stack:
+  fullnameOverride: monitoring-kube-prometheus-stack
+  alertmanager:
+    enabled: false
+  grafana:
+    enabled: true
+    admin:
+      existingSecret: grafana-admin
+      userKey: admin-user
+      passwordKey: admin-password
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    grafana.ini:
+      plugins:
+        # Grafana 13 tries to auto-update bundled plugins and fails under the
+        # chart's non-root filesystem; keep plugins frozen for local kind.
+        preinstall_auto_update: "false"
+        preinstall_disabled: "true"
+        plugin_admin_enabled: "false"
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      annotations:
+        nginx.ingress.kubernetes.io/proxy-buffering: "off"
+      hosts:
+        - grafana.arqh.localtest.me
+      tls:
+        - secretName: grafana-local-tls
+          hosts:
+            - grafana.arqh.localtest.me
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        searchNamespace: ALL
+        folderAnnotation: grafana_folder
+      datasources:
+        enabled: true
+        # Avoid a second "default" Prometheus datasource colliding with ours.
+        defaultDatasourceEnabled: false
+        label: grafana_datasource
+        labelValue: "1"
+        searchNamespace: ALL
+    defaultDashboardsEnabled: true
+  prometheus:
+    prometheusSpec:
+      serviceMonitorSelectorNilUsesHelmValues: false
+      serviceMonitorSelector: {}
+      serviceMonitorNamespaceSelector: {}
+      scrapeInterval: 15s
+      evaluationInterval: 15s
+      retention: 7d
+      resources:
+        requests:
+          cpu: 200m
+          memory: 768Mi
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 4Gi
+  kube-state-metrics:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  prometheus-node-exporter:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 32Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+  prometheusOperator:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+loki:
+  fullnameOverride: monitoring-loki
+  deploymentMode: SingleBinary
+  singleBinary:
+    replicas: 1
+    persistence:
+      enabled: true
+      size: 4Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+  backend:
+    replicas: 0
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+  test:
+    enabled: false
+  gateway:
+    enabled: false
+  lokiCanary:
+    enabled: false
+  monitoring:
+    dashboards:
+      enabled: false
+    rules:
+      enabled: false
+    serviceMonitor:
+      enabled: false
+    selfMonitoring:
+      enabled: false
+      grafanaAgent:
+        installOperator: false
+  loki:
+    auth_enabled: false
+    commonConfig:
+      replication_factor: 1
+    schemaConfig:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+    storage:
+      type: filesystem
+    limits_config:
+      retention_period: 168h
+
+promtail:
+  fullnameOverride: monitoring-promtail
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  config:
+    logLevel: info
+    clients:
+      - url: http://monitoring-loki:3100/loki/api/v1/push
+    snippets:
+      pipelineStages:
+        - cri: {}
+      extraRelabelConfigs:
+        # Match dashboard LogQL `{app="arqh-api"}` (instance + name).
+        - action: replace
+          separator: "-"
+          source_labels:
+            - __meta_kubernetes_pod_label_app_kubernetes_io_instance
+            - __meta_kubernetes_pod_label_app_kubernetes_io_name
+          target_label: app
+        - action: replace
+          source_labels:
+            - __meta_kubernetes_pod_label_app_kubernetes_io_component
+          target_label: component

@@ -25,13 +25,13 @@ env: ## Create .env / .env.docker from examples if missing
 cluster: ## Create the local kind cluster
 	@./run-platform.sh cluster
 
-deps: ## Install metrics-server, ingress-nginx, and the local TLS secret
+deps: ## Install metrics-server, ingress-nginx, monitoring, and local TLS secrets
 	@./run-platform.sh deps
 
 deploy: ## Build/load images and helm install the platform
 	@./run-platform.sh deploy
 
-up: ## Bring up the Kubernetes platform end-to-end
+up: ## Bring up the Kubernetes platform end-to-end with monitoring
 	@./run-platform.sh up
 
 down: ## Helm uninstall + delete the kind cluster
@@ -43,7 +43,7 @@ smoke: ## Run the Kubernetes infra smoke suite
 logs: ## Tail cluster logs (use `make logs ARGS=api`)
 	@./run-platform.sh logs $(ARGS)
 
-ps: ## Show cluster workload status
+ps: ## Show app and monitoring workload status
 	@./run-platform.sh ps
 
 test: ## Run the API integration test suite (requires bun + local Redis/Mongo)
