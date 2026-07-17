@@ -53,8 +53,11 @@ services:
   redis:
     container_name: arqh_redis
     image: redis:7-alpine
-    ports:
-      - "127.0.0.1:6379:6379"
+    # Internal-only: reachable by other services as `redis:6379` over the
+    # compose network. Not published to the host by default to avoid clashing
+    # with a locally-running Redis. Use docker-compose.debug.yml to expose it.
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -66,8 +69,11 @@ services:
   mongo:
     container_name: arqh_mongo
     image: mongo:7
-    ports:
-      - "127.0.0.1:27017:27017"
+    # Internal-only: reachable as `mongo:27017` over the compose network.
+    # Not published to the host by default (avoids clashing with a local Mongo).
+    # Use docker-compose.debug.yml to expose it.
+    expose:
+      - "27017"
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 5s
@@ -80,8 +86,10 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
-    ports:
-      - "127.0.0.1:9090:9090"
+    # Internal-only: scraped/queried by Grafana over the network as
+    # `prometheus:9090`. Expose it on the host via docker-compose.debug.yml.
+    expose:
+      - "9090"
     volumes:
       - ./packages/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -95,8 +103,10 @@ services:
 
   loki:
     image: grafana/loki:latest
-    ports:
-      - "127.0.0.1:3100:3100"
+    # Internal-only: queried by Grafana as `loki:3100`. Expose on the host via
+    # docker-compose.debug.yml if you want to hit the Loki API directly.
+    expose:
+      - "3100"
     volumes:
       - ./packages/monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
       - loki_data:/loki
@@ -117,8 +127,9 @@ services:
 
   grafana:
     image: grafana/grafana:latest
+    # The one monitoring UI published to the host. Override with GRAFANA_PORT.
     ports:
-      - "127.0.0.1:3001:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
     volumes:
       - ./packages/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana_data:/var/lib/grafana

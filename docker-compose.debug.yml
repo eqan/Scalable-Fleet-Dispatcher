@@ -1,0 +1,33 @@
+# ================================================================
+# Debug override — publishes the internal-only services to the host.
+#
+# Use ONLY when you need direct host access to Redis/Mongo/Prometheus/Loki
+# (e.g. running the host test suite against the Docker databases, or poking
+# Redis with redis-cli). By default these are NOT published so they never
+# clash with locally-running services.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d
+#   # or:
+#   ./run-platform.sh up --debug
+#
+# All host ports are overridable to dodge collisions, e.g.:
+#   REDIS_PUBLISH_PORT=6380 MONGO_PUBLISH_PORT=27018 ./run-platform.sh up --debug
+# ================================================================
+
+services:
+  redis:
+    ports:
+      - "127.0.0.1:${REDIS_PUBLISH_PORT:-6379}:6379"
+
+  mongo:
+    ports:
+      - "127.0.0.1:${MONGO_PUBLISH_PORT:-27017}:27017"
+
+  prometheus:
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PUBLISH_PORT:-9090}:9090"
+
+  loki:
+    ports:
+      - "127.0.0.1:${LOKI_PUBLISH_PORT:-3100}:3100"

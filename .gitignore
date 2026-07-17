@@ -1,0 +1,36 @@
+# ---- Dependencies ----
+node_modules/
+
+# ---- Build output ----
+dist/
+build/
+*.tsbuildinfo
+
+# ---- Environment (secrets) ----
+# Ignore real env files, but keep the tracked templates + committed test config.
+.env
+.env.*
+!.env.example
+!.env.docker.example
+!.env.test
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Test / coverage artifacts ----
+coverage/
+playwright-report/
+test-results/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+docs
+AGENTS.md
+
+# ---- Challenge brief (reference material, not a deliverable) ----
+challenge.txt
+case_challenge_platform.pdf
