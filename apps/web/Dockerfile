@@ -1,5 +1,9 @@
-# Base image is parameterized via ARG with a pinned default tag.
+# FROM-scoped ARGs must be declared before the first FROM. An ARG placed
+# after a stage's FROM belongs to that stage and is invisible to the next
+# FROM — BuildKit then resolves ${NGINX_IMAGE} to blank and fails the build.
 ARG BUN_IMAGE=oven/bun:1
+ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.27-alpine
+
 # hadolint ignore=DL3006
 FROM ${BUN_IMAGE} AS build
 WORKDIR /app
@@ -27,9 +31,6 @@ COPY apps/web/ apps/web/
 WORKDIR /app/apps/web
 RUN bun run build
 
-# Serve with nginx
-# Serving image is parameterized via ARG with a pinned default tag.
-ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.27-alpine
 # hadolint ignore=DL3006
 FROM ${NGINX_IMAGE}
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html

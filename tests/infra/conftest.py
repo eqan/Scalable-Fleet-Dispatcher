@@ -38,6 +38,16 @@ def ingress_host() -> str:
 
 
 @pytest.fixture(scope="session")
+def monitoring_namespace() -> str:
+    return os.getenv("MONITORING_NAMESPACE", "monitoring")
+
+
+@pytest.fixture(scope="session")
+def grafana_host() -> str:
+    return os.getenv("GRAFANA_HOST", "grafana.arqh.localtest.me")
+
+
+@pytest.fixture(scope="session")
 def base_url(ingress_host: str) -> str:
     return f"https://{ingress_host}"
 
@@ -60,6 +70,11 @@ def autoscaling_api() -> client.AutoscalingV2Api:
 @pytest.fixture(scope="session")
 def networking_api() -> client.NetworkingV1Api:
     return client.NetworkingV1Api()
+
+
+@pytest.fixture(scope="session")
+def custom_objects_api() -> client.CustomObjectsApi:
+    return client.CustomObjectsApi()
 
 
 @pytest.fixture(scope="session")

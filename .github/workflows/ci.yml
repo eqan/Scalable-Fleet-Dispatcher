@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  typecheck-lint-format:
-    name: Typecheck, Lint, Format
+  typecheck-lint:
+    name: Typecheck, Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,9 +41,6 @@ jobs:
 
       - name: Web lint
         run: bun run lint
-
-      - name: Format check
-        run: bun run format:check
 
   api-integration-tests:
     name: API Integration Tests

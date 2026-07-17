@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { recordDependencyHealth } from "../middleware/metrics.ts";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -56,6 +57,7 @@ export const createHealthController = (deps: {
   draftStore: Pingable;
   durableStore: Pingable;
 }) => ({
+  // Dependency-free — used for liveness/startup so Redis/Mongo blips do not restart pods.
   live: (_req: Request, res: Response): void => {
     res.status(200).json({
       status: "alive",
@@ -69,6 +71,11 @@ export const createHealthController = (deps: {
       probeService(() => deps.draftStore.ping()),
       probeService(() => deps.durableStore.ping()),
     ]);
+
+    // Feed Prometheus from readiness probes so Grafana sees fresh dep signals
+    // without a separate scraper loop (probes already hit this path).
+    recordDependencyHealth("redis", redisHealth.status, redisHealth.latency_ms);
+    recordDependencyHealth("mongo", mongoHealth.status, mongoHealth.latency_ms);
 
     const allHealthy =
       redisHealth.status === "connected" &&

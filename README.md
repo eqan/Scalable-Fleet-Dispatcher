@@ -81,12 +81,15 @@ make bootstrap        # preflight -> kind cluster -> deps -> deploy -> infra smo
 This runs the stages in [`run-platform.sh`](run-platform.sh):
 
 1. **cluster** — `kind create cluster` from [`infra/kind/kind-cluster.yaml`](infra/kind/kind-cluster.yaml) (ports 80/443 mapped).
-2. **deps** — installs `metrics-server` (patched `--kubelet-insecure-tls`), `ingress-nginx`, and a self-signed TLS secret.
+2. **deps** — installs `metrics-server` (patched `--kubelet-insecure-tls`), `ingress-nginx`, the
+   monitoring stack (`kube-prometheus-stack` + Loki + Promtail), and self-signed TLS secrets for the
+   app + Grafana hosts.
 3. **deploy** — builds `arqh-api|worker|web:local`, `kind load`s them, and `helm upgrade --install arqh infra/helm/arqh-platform -n arqh`.
 4. **smoke** — waits for Ingress health, then runs `pytest tests/infra` from an isolated venv.
 
 **Green** means: all pods Ready, `kubectl get hpa` shows real (non-`<unknown>`) metrics, and
 `curl -k https://arqh.localtest.me/api/health` returns `200` with Redis + Mongo `connected`.
+Grafana is at `https://grafana.arqh.localtest.me` (admin creds under `.tmp/k8s/grafana-admin.env`).
 
 ### Traffic flow
 
@@ -117,11 +120,12 @@ INGRESS_HOST=arqh.localtest.me KUBECONFIG=~/.kube/config \
   ConfigMap/Secret separation, HPA metrics populated, Ingress TLS + split routing.
 - `tests/infra/test_smoke_e2e.py` — health, hydration, assign round-trip, optimize pipeline, SSE, `/metrics` non-exposure.
 - `tests/infra/test_probe_resilience.py` — deleting a Redis pod degrades readiness (not liveness) and recovers.
+- `tests/infra/test_monitoring.py` — monitoring workloads Ready, ServiceMonitor, Grafana ingress, Prometheus scrapes `arqh-api`.
 
 ### Teardown
 
 ```bash
-make down             # helm uninstall + kind delete cluster
+make down             # uninstall monitoring + app releases, then kind delete cluster
 ```
 
 ## Quick Start
@@ -268,7 +272,21 @@ User Action → Frontend (optimistic UI update)
 
 ## Observability & Monitoring
 
-The project includes a full **Prometheus + Grafana + Loki** observability stack, pre-provisioned with dashboards and datasources -- zero manual Grafana setup required.
+### Kubernetes (submission path)
+
+The bootstrap installs a separate Helm release from [`infra/helm/monitoring`](infra/helm/monitoring):
+
+| Component                        | Role                                                                                   |
+| -------------------------------- | -------------------------------------------------------------------------------------- |
+| Prometheus Operator + Prometheus | Scrapes the API via a `ServiceMonitor` on ClusterIP `/metrics`                         |
+| Grafana                          | UI at `https://grafana.arqh.localtest.me` (sidecar-provisioned datasources/dashboards) |
+| Loki + Promtail                  | Pod log shipping; LogQL uses `{app="arqh-api"}`                                        |
+
+`/api/health` also records `arqh_dependency_latency_ms` / `arqh_dependency_up` so dependency panels stay fresh without a separate probe loop.
+
+### Compose fallback
+
+The Compose stack still ships Prometheus + Grafana + Loki via `docker-compose.monitoring.yml` for the no-Kubernetes path.
 
 ### Metrics (Prometheus)
 
@@ -286,11 +304,12 @@ The "Arqh API Overview" dashboard ships with 5 panels ready to use:
 | API Request Count by Route | `sum(rate(http_request_duration_ms_count[$__rate_interval])) by (route)`                     |
 | Error Rate per Route (5xx) | `sum(rate(http_request_duration_ms_count{status_code=~"5.."}[$__rate_interval])) by (route)` |
 | CPU & Memory Usage         | `rate(process_cpu_seconds_total[1m])` + `process_resident_memory_bytes`                      |
-| API Logs                   | `{service="api"} \| json` (Loki)                                                             |
+| API Logs                   | Compose: `{service="api"} \| json` · K8s: `{app="arqh-api"} \| json` (Loki)                  |
 
 ### Log Aggregation (Loki + Promtail)
 
-Promtail discovers Docker container logs automatically and ships them to Loki. Since the API uses Pino with structured JSON output, logs are queryable in Grafana with LogQL (e.g., `{service="api"} | json | level="error"`).
+- **Compose:** Promtail discovers Docker container logs; LogQL uses `{service="api"}`.
+- **Kubernetes:** Promtail DaemonSet ships pod logs; dashboards query `{app="arqh-api"}` (relabeled from `app.kubernetes.io/*`).
 
 ### Production Monitoring
 
@@ -371,7 +390,7 @@ Private -- Arqh
 
 ---
 
-## Architecture Comparison Matrix (Pillar A + B)
+## Architecture Comparison Matrix (Pillar A + B + D)
 
 Every non-obvious infrastructure decision, its chosen option, the main alternative, the trade-off,
 and the next step. Decision detail lives in [`docs/conventions.md`](docs/conventions.md).
@@ -395,3 +414,6 @@ and the next step. Decision detail lives in [`docs/conventions.md`](docs/convent
 | Dockerfile lint   | **hadolint**                              | Dockle                             | Strong best-practice feedback with easy CI integration                              | Add image security scan if needed       |
 | Manifest schema   | **helm lint + kubeconform**               | kube-linter / conftest / Polaris   | Lightweight chart+schema validation; no custom policy layer yet                     | Add policy-as-code if requirements grow |
 | Registry delivery | **GHCR + SHA tags**                       | Docker Hub / local-only kind load  | Native Actions auth and immutable deploy tags; fork package visibility needs care   | Reuse GHCR images in CI smoke/deploy    |
+| Observability     | **Separate monitoring Helm release**      | Embed Prometheus into app chart    | Operator CRDs + Grafana/Loki quickly; more chart surface area                       | kind-in-CI observability smoke          |
+| Metrics exposure  | **ServiceMonitor (ClusterIP only)**       | Ingress `/metrics`                 | Keeps scrape private; requires Prometheus Operator                                  | —                                       |
+| Grafana access    | **Dedicated ingress host + TLS**          | `kubectl port-forward` only        | Easy screenshots/demo UX; extra TLS secret + creds file under `.tmp/`               | cert-manager / SSO later                |

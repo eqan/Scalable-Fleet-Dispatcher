@@ -1,4 +1,4 @@
-import { collectDefaultMetrics, Histogram, register } from "prom-client";
+import { collectDefaultMetrics, Gauge, Histogram, register } from "prom-client";
 import type { Request, Response, NextFunction } from "express";
 
 /* ------------------------------------------------------------------ */
@@ -32,6 +32,20 @@ const httpRequestDuration = new Histogram({
   help: "HTTP request duration in milliseconds",
   labelNames: ["method", "route", "status_code"] as const,
   buckets: [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+});
+
+/** Latest Redis/Mongo probe latency from `/api/health` (low cardinality). */
+const dependencyLatency = new Gauge({
+  name: "arqh_dependency_latency_ms",
+  help: "Latest dependency health-check latency in milliseconds",
+  labelNames: ["service"] as const,
+});
+
+/** Latest Redis/Mongo probe result from `/api/health` (1=up, 0=down). */
+const dependencyUp = new Gauge({
+  name: "arqh_dependency_up",
+  help: "Latest dependency health-check result (1=up, 0=down)",
+  labelNames: ["service"] as const,
 });
 
 /* ------------------------------------------------------------------ */
@@ -94,9 +108,9 @@ export const metricsMiddleware = (
  * Returns all collected metrics in Prometheus text exposition format.
  *
  * This endpoint is mounted at `/metrics` (outside `/api/*`) so it is:
- *   - NOT proxied through nginx (internal-only)
+ *   - NOT routed through the public Ingress (ClusterIP / compose-network only)
  *   - NOT subject to rate limiting or rehydration guards
- *   - Only reachable within the Docker network by Prometheus
+ *   - Scraped by Prometheus (ServiceMonitor on Kubernetes; compose scrape config locally)
  */
 export const metricsHandler = async (
   _req: Request,
@@ -104,4 +118,13 @@ export const metricsHandler = async (
 ): Promise<void> => {
   res.set("Content-Type", register.contentType);
   res.end(await register.metrics());
+};
+
+export const recordDependencyHealth = (
+  service: "redis" | "mongo",
+  status: "connected" | "error",
+  latencyMs: number,
+): void => {
+  dependencyLatency.labels(service).set(latencyMs);
+  dependencyUp.labels(service).set(status === "connected" ? 1 : 0);
 };
