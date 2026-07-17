@@ -338,7 +338,7 @@ ensure_grafana_admin_secret() {
 }
 
 apply_monitoring_grafana_assets() {
-  local datasources_file="packages/monitoring/grafana/provisioning/datasources/datasources-k8s.yml"
+  local datasources_file="packages/monitoring/grafana/k8s/datasources.yaml"
   local -a dashboards=(
     "api-overview.json"
     "platform-observability.json"

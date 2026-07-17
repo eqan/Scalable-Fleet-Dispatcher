@@ -182,6 +182,7 @@ export const createTestContext = async (): Promise<TestContext> => {
     cleanup: async () => {
       container.resultsConsumer.stop();
       server.close();
+      await container.realtimeGateway.stop().catch(() => {});
       await redis.quit();
       await container.streamRedis.quit().catch(() => {});
       await mongoClient.close();

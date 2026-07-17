@@ -95,7 +95,7 @@ Grafana is at `https://grafana.arqh.localtest.me` (admin creds under `.tmp/k8s/g
 
 ```
 Browser ──HTTPS──▶ ingress-nginx ─┬─ /api/*  ─▶ arqh-api  (ClusterIP :4000) ─▶ Redis + Mongo
-                                  └─ /        ─▶ arqh-web  (ClusterIP :80, nginx + SPA)
+                                  └─ /        ─▶ arqh-web  (ClusterIP :8080, nginx-unprivileged + SPA)
 /metrics is served on the API root only and is NOT routed by the Ingress (stays internal).
 ```
 
@@ -105,14 +105,86 @@ Browser ──HTTPS──▶ ingress-nginx ─┬─ /api/*  ─▶ arqh-api  (C
 - **Rolling update:** rebuild + `kind load`, then `helm upgrade arqh infra/helm/arqh-platform -n arqh`.
 - **Inspect probes:** `kubectl describe deploy arqh-api -n arqh` — readiness `/api/health` (dependency-aware),
   liveness/startup `/api/live` (dependency-free, so a Redis blip never triggers a restart loop).
-- **Status / logs:** `make ps` · `make logs ARGS=api`.
+- **Status / logs:** `make ps` · `make logs ARGS=api` (also `grafana`, `prometheus`, `loki`).
+
+### Telemetry coordinates
+
+| Item | Value |
+|------|-------|
+| Grafana URL | `https://grafana.arqh.localtest.me` (self-signed TLS — accept the browser warning) |
+| Admin creds | generated at bootstrap into `.tmp/k8s/grafana-admin.env` (`admin-user` / `admin-password`) |
+| Dashboards | **Arqh API Overview** · **Arqh Platform Observability** (folder `Arqh`) |
+| Prometheus | ClusterIP only — scrape via ServiceMonitor `arqh-api` on `/metrics` |
+| Useful PromQL | `up{job="arqh-api"}` · `rate(http_request_duration_ms_count{status_code=~"5.."}[5m])` · `arqh_dependency_up` |
+| Useful LogQL | `{app="arqh-api"} \| json \| level="error"` |
+
+### How to check monitoring (operator walkthrough)
+
+1. **Bring the platform up** (if it is not already green):
+
+   ```bash
+   make bootstrap
+   ```
+
+2. **Confirm monitoring pods are Ready**:
+
+   ```bash
+   make ps
+   # or
+   kubectl get pods -n monitoring
+   kubectl get pods -n arqh
+   ```
+
+3. **Read Grafana admin credentials** (generated once, reused on later boots):
+
+   ```bash
+   cat .tmp/k8s/grafana-admin.env
+   # admin-user=admin
+   # admin-password=...
+   ```
+
+4. **Open Grafana in the browser**:
+   - URL: [https://grafana.arqh.localtest.me](https://grafana.arqh.localtest.me)
+   - Accept the self-signed certificate warning
+   - Sign in with the values from `.tmp/k8s/grafana-admin.env`
+
+5. **Open the provisioned dashboards** (Dashboards → Browse → folder **Arqh**):
+
+   | Dashboard | What to verify |
+   |-----------|----------------|
+   | **Arqh API Overview** | Request heatmap, request count by route, 4xx/5xx rates, process CPU/mem, API logs |
+   | **Arqh Platform Observability** | Pod restarts, error-log spikes, API 5xx by route, capacity vs requests/limits, Redis/Mongo dependency latency, request heatmap |
+
+6. **Generate a little traffic** so panels are not empty:
+
+   ```bash
+   curl -sk https://arqh.localtest.me/api/health
+   curl -sk https://arqh.localtest.me/api/state
+   # optional: open the app UI and click around
+   open https://arqh.localtest.me
+   ```
+
+   Wait ~15–30s (Prometheus scrape interval), then refresh the dashboard (time range: **Last 15 minutes**).
+
+7. **Quick signals that mean "healthy"**:
+   - Explore → Prometheus → query `up{job="arqh-api"}` → value `1`
+   - Explore → Prometheus → `arqh_dependency_up` → `redis` and `mongo` are `1`
+   - Explore → Loki → `{app="arqh-api"} | json` → recent log lines appear
+   - Platform Observability → **Dependency Latency** shows Redis/Mongo lines after health probes
+
+8. **If something is blank**:
+   - No metrics: `kubectl get servicemonitor -n monitoring` and `make smoke` (includes scrape checks)
+   - No logs: wait for Promtail, then confirm labels with `{app="arqh-api"}`
+   - Cannot reach Grafana: `kubectl get ingress -n monitoring` and `make logs ARGS=grafana`
+   - Wrong password: re-read `.tmp/k8s/grafana-admin.env` (do not recreate casually — it is the source of truth for the Secret)
 
 ### Testing
 
 ```bash
 make smoke            # wait for Ingress health, then pytest tests/infra -v (venv auto-managed)
 # or directly:
-INGRESS_HOST=arqh.localtest.me KUBECONFIG=~/.kube/config \
+INGRESS_HOST=arqh.localtest.me GRAFANA_HOST=grafana.arqh.localtest.me \
+KUBECONFIG=~/.kube/config \
   .tmp/infra-venv/bin/python -m pytest tests/infra -v
 ```
 
@@ -350,7 +422,6 @@ GitHub Actions now covers both **quality gates** and **image packaging**:
   - installs dependencies with Bun
   - type-checks all workspaces (`bun run typecheck`)
   - runs web ESLint (`bun run lint`)
-  - runs formatting checks (`bun run format:check`)
   - runs Dockerfile lint (`hadolint`)
   - lints and renders the Helm chart (`helm lint` + `kubeconform`)
   - runs the API integration suite against real Redis + MongoDB service containers (`bun run test`)
@@ -405,15 +476,15 @@ and the next step. Decision detail lives in [`docs/conventions.md`](docs/convent
 | Config vs secrets | **ConfigMap + Secret** via `envFrom`      | Bake into image / single ConfigMap | Mirrors `env.ts` keys; secrets never leak into ConfigMap                            | Sealed/external-secrets                 |
 | Liveness split    | **`/api/live`** + `/api/health` readiness | Single health probe for both       | Dependency-free liveness avoids restart loops on Redis/Mongo blips                  | —                                       |
 | Web base image    | **nginx-unprivileged** (:8080)            | rootful `nginx:alpine` (:80)       | Satisfies non-root invariant across the stack; small port shift                     | Evaluate distroless                     |
-| Infra tests       | **pytest + k8s client**                   | Bash + kubectl / Terratest         | Readable assertions, first-class k8s API, runs locally + CI                         | Wire into CI (Pillar B)                 |
+| Infra tests       | **pytest + k8s client**                   | Bash + kubectl / Terratest         | Readable assertions, first-class k8s API, runs locally + CI                         | Add kind-in-CI smoke later              |
 | Worker scaling    | **CPU HPA (optional)**                    | KEDA on stream lag                 | Simple for the demo; not lag-aware                                                  | KEDA on `events:stream` lag             |
 | TLS (local)       | **Self-signed secret**                    | cert-manager                       | Zero extra controllers locally; browser warning + manual cert                       | cert-manager in real envs               |
 | Image tags        | **`:local` + `IfNotPresent`**             | `:latest`                          | Deterministic on kind; no `:latest` in manifests                                    | GHCR `:<git-sha>` in CI                 |
 | CI/CD engine      | **GitHub Actions**                        | CircleCI / one monolithic pipeline | Native GitHub status checks and permissions; more workflow YAML to maintain         | Add kind-in-CI smoke                    |
-| Formatter         | **Prettier**                              | Biome / dprint                     | Fast, predictable for docs/workflow/config files; excludes Helm templates           | Revisit broader TS formatting later     |
 | Dockerfile lint   | **hadolint**                              | Dockle                             | Strong best-practice feedback with easy CI integration                              | Add image security scan if needed       |
 | Manifest schema   | **helm lint + kubeconform**               | kube-linter / conftest / Polaris   | Lightweight chart+schema validation; no custom policy layer yet                     | Add policy-as-code if requirements grow |
 | Registry delivery | **GHCR + SHA tags**                       | Docker Hub / local-only kind load  | Native Actions auth and immutable deploy tags; fork package visibility needs care   | Reuse GHCR images in CI smoke/deploy    |
 | Observability     | **Separate monitoring Helm release**      | Embed Prometheus into app chart    | Operator CRDs + Grafana/Loki quickly; more chart surface area                       | kind-in-CI observability smoke          |
 | Metrics exposure  | **ServiceMonitor (ClusterIP only)**       | Ingress `/metrics`                 | Keeps scrape private; requires Prometheus Operator                                  | —                                       |
 | Grafana access    | **Dedicated ingress host + TLS**          | `kubectl port-forward` only        | Easy screenshots/demo UX; extra TLS secret + creds file under `.tmp/`               | cert-manager / SSO later                |
+| Compose baseline  | **Kept as `compose-*` fallback**          | Delete compose entirely            | Useful no-K8s path for app work; submission default remains `make bootstrap`        | —                                       |

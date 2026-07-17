@@ -48,22 +48,54 @@ function compareStreamIds(a: string, b: string): number {
 /* ------------------------------------------------------------------ */
 
 /**
- * Server-Sent Events gateway backed by a capped Redis Stream for replay.
+ * Server-Sent Events gateway backed by a capped Redis Stream for replay and
+ * Redis Pub/Sub for live fan-out across API replicas.
  *
- * - Keeps a map of connected clients
- * - Broadcasts state-change events to all clients
- * - Persists events into a capped Redis Stream (`sse:replay`) for
- *   durable Last-Event-ID replay across restarts / multi-instance
- * - Gates live delivery until replay completes (no out-of-order events)
- * - Automatic cleanup on client disconnect
+ * Why pub/sub: with `api.replicaCount >= 2`, an SSE client may land on pod A
+ * while a mutation hits pod B. In-memory broadcast alone would miss that client.
+ * Every replica publishes to `sse:live` after XADD; every replica's subscriber
+ * writes to its local SSE sockets.
  */
 export class SseGateway implements IRealtimeGateway {
   /** Hard cap on concurrent SSE connections to prevent resource exhaustion. */
   private static readonly MAX_CLIENTS = 256;
 
   private clients = new Map<string, SseClientState>();
+  /** Dedicated connection — SUBSCRIBE mode blocks other commands on the socket. */
+  private readonly subRedis: Redis;
+  private started = false;
 
-  constructor(private readonly redis: Redis) {}
+  constructor(private readonly redis: Redis) {
+    this.subRedis = redis.duplicate();
+  }
+
+  async start(): Promise<void> {
+    if (this.started) return;
+    this.started = true;
+
+    this.subRedis.on("message", (channel: string, message: string) => {
+      if (channel !== STREAM_KEYS.sseLive) return;
+      this.deliverLivePayload(message);
+    });
+
+    await this.subRedis.subscribe(STREAM_KEYS.sseLive);
+    logger.info({ channel: STREAM_KEYS.sseLive }, "SSE live pub/sub subscribed");
+  }
+
+  async stop(): Promise<void> {
+    if (!this.started) return;
+    this.started = false;
+    try {
+      await this.subRedis.unsubscribe(STREAM_KEYS.sseLive);
+    } catch {
+      // ignore — shutting down
+    }
+    try {
+      await this.subRedis.quit();
+    } catch {
+      this.subRedis.disconnect();
+    }
+  }
 
   addClient(req: Request, res: Response): void {
     // Guard: prevent connection-exhaustion DoS
@@ -140,7 +172,7 @@ export class SseGateway implements IRealtimeGateway {
         "data",
         serialized,
       )
-      .then((streamId) => {
+      .then(async (streamId) => {
         if (!streamId) return;
 
         const payload = [
@@ -151,26 +183,35 @@ export class SseGateway implements IRealtimeGateway {
           "", // trailing newline per SSE spec
         ].join("\n");
 
-        for (const [clientId, client] of this.clients) {
-          if (!client.ready) {
-            client.queue.push({ id: streamId, payload });
-            continue;
-          }
-          try {
-            client.res.write(payload);
-          } catch {
-            // Client may have disconnected without triggering 'close'
-            this.clients.delete(clientId);
-          }
-        }
+        // Fan out to every API replica (including this one) via Pub/Sub.
+        await this.redis.publish(STREAM_KEYS.sseLive, payload);
       })
       .catch((err: unknown) => {
-        logger.error({ err }, "Failed to XADD SSE replay event");
+        logger.error({ err }, "Failed to XADD/PUBLISH SSE live event");
       });
   }
 
   getClientCount(): number {
     return this.clients.size;
+  }
+
+  /** Apply a published SSE frame to local sockets (and replay queues). */
+  private deliverLivePayload(payload: string): void {
+    // Extract stream id for queue dedupe (line: `id: <streamId>`).
+    const idLine = payload.split("\n").find((line) => line.startsWith("id:"));
+    const streamId = idLine ? idLine.slice(3).trim() : "";
+
+    for (const [clientId, client] of this.clients) {
+      if (!client.ready) {
+        if (streamId) client.queue.push({ id: streamId, payload });
+        continue;
+      }
+      try {
+        client.res.write(payload);
+      } catch {
+        this.clients.delete(clientId);
+      }
+    }
   }
 
   /* ------------------------------------------------------------------ */

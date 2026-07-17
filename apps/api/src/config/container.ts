@@ -65,6 +65,7 @@ export const createContainer = (deps: ContainerDeps): Container => {
 
   const scriptManager = new LuaScriptManager(LUA_SCRIPTS);
   const durableStore = new MongoDurableStore(deps.mongoDb);
+  const realtimeGateway = new SseGateway(deps.redis);
 
   return {
     redis: deps.redis,
@@ -78,13 +79,14 @@ export const createContainer = (deps: ContainerDeps): Container => {
       "api-1",
       { staleClaimMs: 60_000 },
     ),
-    realtimeGateway: new SseGateway(deps.redis),
+    realtimeGateway,
     streamRedis,
 
     async initialize() {
       await Promise.all([
         scriptManager.loadAll(deps.redis),
         durableStore.ensureIndexes(),
+        realtimeGateway.start(),
       ]);
     },
   };
