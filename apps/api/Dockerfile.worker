@@ -1,4 +1,6 @@
+# Base image is parameterized via ARG with a pinned default tag.
 ARG BUN_IMAGE=oven/bun:1
+# hadolint ignore=DL3006
 FROM ${BUN_IMAGE} AS base
 WORKDIR /app
 

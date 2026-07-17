@@ -1,4 +1,6 @@
+# Base image is parameterized via ARG with a pinned default tag.
 ARG BUN_IMAGE=oven/bun:1
+# hadolint ignore=DL3006
 FROM ${BUN_IMAGE} AS build
 WORKDIR /app
 
@@ -26,7 +28,9 @@ WORKDIR /app/apps/web
 RUN bun run build
 
 # Serve with nginx
+# Serving image is parameterized via ARG with a pinned default tag.
 ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.27-alpine
+# hadolint ignore=DL3006
 FROM ${NGINX_IMAGE}
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 COPY apps/web/nginx/default.conf.template /etc/nginx/templates/default.conf.template
