@@ -322,8 +322,8 @@ flowchart TB
 
     subgraph NS_ARQH["namespace: arqh"]
       WEB["web<br/>nginx-unprivileged :8080"]
-      API["api ×2<br/>Bun/Express :4000"]
-      WRK["worker ×1<br/>Bun optimizer"]
+      API["api x2<br/>Bun/Express :4000"]
+      WRK["worker x1<br/>Bun optimizer"]
       REDIS[("redis STS<br/>hot + streams")]
       MONGO[("mongo STS<br/>durable")]
     end
@@ -340,13 +340,13 @@ flowchart TB
   end
 
   Browser -->|HTTPS| ING
-  ING -->|"/ → web"| WEB
-  ING -->|"/api → api"| API
+  ING -->|"/ to web"| WEB
+  ING -->|"/api to api"| API
   Browser -->|HTTPS grafana host| GRAF
 
-  API ⇄ REDIS
-  API ⇄ MONGO
-  WRK ⇄ REDIS
+  API <--> REDIS
+  API <--> MONGO
+  WRK <--> REDIS
   API -.->|ClusterIP scrape| SMO
   SMO --> PROM
   PT -->|pod logs| LOKI
@@ -365,12 +365,12 @@ HTTPS is decrypted at Ingress; pods get plain HTTP in-cluster. `/metrics` is scr
 flowchart LR
   C["Browser"] -->|"1. HTTPS encrypted"| ING["Ingress<br/>TLS termination<br/>decrypt + route"]
 
-  ING -->|"2a. path /api<br/>HTTP in-cluster"| API["Service arqh-api<br/>→ pods :4000"]
-  ING -->|"2b. path /<br/>HTTP in-cluster"| WEB["Service arqh-web<br/>→ pods :8080"]
+  ING -->|"2a. path /api<br/>HTTP in-cluster"| API["Service arqh-api<br/>to pods :4000"]
+  ING -->|"2b. path /<br/>HTTP in-cluster"| WEB["Service arqh-web<br/>to pods :8080"]
 
-  API --> H["/api/health · /api/live"]
+  API --> H["/api/health and /api/live"]
   API --> E["/api/events SSE"]
-  API --> D["/api/state · mutations · optimize"]
+  API --> D["/api/state mutations optimize"]
   WEB --> SPA["React static assets"]
 
   PROM["Prometheus<br/>in monitoring ns"] -->|"3. scrape ClusterIP<br/>never via Ingress"| M["API /metrics"]
@@ -380,15 +380,15 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  HPA_A["HPA arqh-api<br/>min 2 · max 5<br/>CPU + memory"] -->|scale| API["Deployment api"]
+  HPA_A["HPA arqh-api<br/>min 2 max 5<br/>CPU + memory"] -->|scale| API["Deployment api"]
   HPA_W["HPA worker<br/>disabled by default"] -.-> WRK["Deployment worker"]
 
-  WEB["Deployment web ×1"]
-  REDIS["StatefulSet redis ×1"]
-  MONGO["StatefulSet mongo ×1"]
+  WEB["Deployment web x1"]
+  REDIS["StatefulSet redis x1"]
+  MONGO["StatefulSet mongo x1"]
 ```
 
-### Probe contract (readiness ≠ liveness)
+### Probe contract (readiness vs liveness)
 
 ```mermaid
 sequenceDiagram
@@ -397,18 +397,18 @@ sequenceDiagram
   participant R as Redis
   participant M as Mongo
 
-  Note over K,A: startup / liveness → /api/live (dependency-free)
+  Note over K,A: startup / liveness = /api/live (dependency-free)
   K->>A: GET /api/live
   A-->>K: 200 alive
 
-  Note over K,A: readiness → /api/health (deps)
+  Note over K,A: readiness = /api/health (deps)
   K->>A: GET /api/health
   A->>R: ping
   A->>M: ping
   alt both up
-    A-->>K: 200 healthy → Ready → gets traffic
+    A-->>K: 200 healthy - Ready - gets traffic
   else redis or mongo down
-    A-->>K: 503 degraded → NotReady → no traffic<br/>(no restart)
+    A-->>K: 503 degraded - NotReady - no traffic (no restart)
   end
 ```
 
@@ -457,7 +457,7 @@ flowchart TD
   D --> D3["TLS secrets"]
   D --> D4["helm monitoring"]
   D --> E["deploy"]
-  E --> E1["docker build ×3"]
+  E --> E1["docker build x3"]
   E --> E2["kind load"]
   E --> E3["helm upgrade arqh"]
   E --> F["smoke<br/>pytest tests/infra"]
@@ -477,12 +477,12 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  V["values.yaml<br/>ingress.host=…"] --> H["helm template / upgrade"]
+  V["values.yaml<br/>ingress.host"] --> H["helm template / upgrade"]
   R["Release.Name=arqh"] --> H
-  T["templates/ingress.yaml<br/>{{ .Values… }}"] --> H
+  T["templates/ingress.yaml<br/>Values placeholders"] --> H
   P["_helpers.tpl<br/>componentName"] --> H
   H --> Y["Rendered YAML<br/>name: arqh-ingress<br/>host: arqh.localtest.me"]
-  Y --> K["kubectl / Helm → API server"]
+  Y --> K["kubectl / Helm to API server"]
   K --> O["Ingress object live in cluster"]
 ```
 
@@ -493,11 +493,11 @@ flowchart LR
   PR["PR / push main"] --> CI["ci.yml"]
   CI --> T["typecheck + lint"]
   CI --> I["api integration tests<br/>Redis+Mongo services"]
-  CI --> H["hadolint ×3 Dockerfiles"]
+  CI --> H["hadolint x3 Dockerfiles"]
   CI --> V["helm lint + template<br/>+ kubeconform"]
 
   MAIN["push main"] --> B["build.yml"]
-  B --> P["build + push to GHCR<br/>ghcr.io/…/arqh-api, worker, web<br/>tag = git SHA"]
+  B --> P["build + push to GHCR<br/>ghcr.io owner arqh-api worker web<br/>tag = git SHA"]
 ```
 
 ### Infra tests & config
@@ -512,8 +512,8 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  CM["ConfigMap<br/>PORT · REDIS_HOST · MONGO_URI · CORS_ORIGIN · …"] --> POD["api / worker pods"]
-  SEC["Secret<br/>REDIS_PASSWORD · …"] --> POD
+  CM["ConfigMap<br/>PORT REDIS_HOST MONGO_URI CORS_ORIGIN"] --> POD["api / worker pods"]
+  SEC["Secret<br/>REDIS_PASSWORD"] --> POD
 ```
 
 ### Core Data Flow (app)
