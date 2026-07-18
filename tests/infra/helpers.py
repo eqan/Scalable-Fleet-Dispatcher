@@ -7,7 +7,8 @@ def policy_peers(policy, *, pods: bool = False) -> set[str]:
     label = "app.kubernetes.io/name" if pods else "kubernetes.io/metadata.name"
     names: set[str] = set()
     for rule in policy.spec.ingress or []:
-        for peer in rule.from_ or []:
+        # kubernetes-client renames YAML "from" to "_from" (from is a Python keyword).
+        for peer in getattr(rule, "_from", None) or []:
             selector = peer.pod_selector if pods else peer.namespace_selector
             value = (getattr(selector, "match_labels", None) or {}).get(label)
             if value:
