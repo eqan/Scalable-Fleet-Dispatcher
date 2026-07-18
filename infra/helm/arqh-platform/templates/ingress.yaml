@@ -1,4 +1,16 @@
 {{- if .Values.ingress.enabled }}
+# Headers nginx adds to upstream requests after TLS termination.
+# Uses proxy-set-headers (not rewrite-target) so /api paths stay intact.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "arqh.componentName" (dict "root" . "name" "ingress-headers") }}
+  labels:
+    {{- include "arqh.commonLabels" (dict "root" . "name" "ingress-headers" "component" "proxy") | nindent 4 }}
+data:
+  X-Forwarded-Proto: "https"
+  X-Forwarded-Port: "443"
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -7,6 +19,7 @@ metadata:
     {{- include "arqh.commonLabels" (dict "root" . "name" "ingress" "component" "proxy") | nindent 4 }}
   annotations:
     {{- toYaml .Values.ingress.annotations | nindent 4 }}
+    nginx.ingress.kubernetes.io/proxy-set-headers: {{ printf "%s/%s" .Release.Namespace (include "arqh.componentName" (dict "root" . "name" "ingress-headers")) | quote }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   tls:

@@ -9,8 +9,7 @@ ingress:
   host: arqh.localtest.me
   tls:
     secretName: arqh-local-tls
-  # SSE needs buffering off + a long read timeout. Only /api is routed to the
-  # API service, so /metrics (served at the API root) is never reachable here.
+  # SSE: no buffering + long timeouts. Header rewrites live in ingress.yaml.
   annotations:
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "86400"
