@@ -310,51 +310,49 @@ App deep dives: [`apps/api/README.md`](apps/api/README.md) · [`apps/web/README.
 
 ### Platform topology (kind)
 
+Runtime view after `make bootstrap` (cluster create / Helm / smoke are in [Bootstrap lifecycle](#bootstrap-lifecycle) below — not shown as dangling edges here).
+
 ```mermaid
 flowchart TB
-  subgraph Host["Laptop / Docker Desktop"]
-    Browser["Browser"]
-    Bootstrap["run-platform.sh / make bootstrap"]
-  end
+  Browser["Browser"]
 
-  subgraph Kind["kind cluster: arqh<br/>infra/kind/kind-cluster.yaml"]
-    ING["ingress-nginx<br/>:80/:443"]
+  subgraph Kind["kind cluster: arqh"]
+    ING["ingress-nginx :80/:443"]
+    MS["metrics-server"]
 
     subgraph NS_ARQH["namespace: arqh"]
-      WEB["web<br/>nginx-unprivileged :8080"]
-      API["api x2<br/>Bun/Express :4000"]
-      WRK["worker x1<br/>Bun optimizer"]
-      REDIS[("redis STS<br/>hot + streams")]
-      MONGO[("mongo STS<br/>durable")]
+      WEB["web :8080"]
+      API["api x2 :4000"]
+      WRK["worker x1"]
+      REDIS[("redis")]
+      MONGO[("mongo")]
     end
 
     subgraph NS_MON["namespace: monitoring"]
+      SMO["ServiceMonitor"]
       PROM["Prometheus"]
-      GRAF["Grafana"]
+      PT["Promtail"]
       LOKI["Loki"]
-      PT["Promtail DS"]
-      SMO["ServiceMonitor<br/>arqh-api /metrics"]
+      GRAF["Grafana"]
     end
-
-    MS["metrics-server"]
   end
 
-  Browser -->|HTTPS| ING
-  ING -->|"/ to web"| WEB
-  ING -->|"/api to api"| API
-  Browser -->|HTTPS grafana host| GRAF
+  Browser -->|HTTPS arqh.localtest.me| ING
+  Browser -->|HTTPS grafana.arqh.localtest.me| GRAF
+
+  ING -->|path /| WEB
+  ING -->|path /api| API
 
   API <--> REDIS
   API <--> MONGO
   WRK <--> REDIS
-  API -.->|ClusterIP scrape| SMO
+
+  API -.->|scrape /metrics| SMO
   SMO --> PROM
   PT -->|pod logs| LOKI
   PROM --> GRAF
   LOKI --> GRAF
-  MS -.->|CPU/mem| API
-
-  Bootstrap -->|kind + helm + pytest| Kind
+  MS -.->|CPU/mem for HPA| API
 ```
 
 ### Traffic through Ingress (TLS termination)
