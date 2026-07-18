@@ -23,6 +23,8 @@ api:
   containerPort: 4000
   service:
     port: 4000
+  pdb:
+    minAvailable: 1
   env:
     PORT: "4000"
     ENV: development

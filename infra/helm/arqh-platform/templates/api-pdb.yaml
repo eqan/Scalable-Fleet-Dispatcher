@@ -1,0 +1,11 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "arqh.componentName" (dict "root" . "name" "api") }}
+  labels:
+    {{- include "arqh.commonLabels" (dict "root" . "name" "api" "component" "backend") | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.api.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "arqh.selectorLabels" (dict "root" . "name" "api") | nindent 6 }}

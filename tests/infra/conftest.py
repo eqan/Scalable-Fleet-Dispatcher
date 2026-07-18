@@ -73,6 +73,11 @@ def networking_api() -> client.NetworkingV1Api:
 
 
 @pytest.fixture(scope="session")
+def policy_api() -> client.PolicyV1Api:
+    return client.PolicyV1Api()
+
+
+@pytest.fixture(scope="session")
 def custom_objects_api() -> client.CustomObjectsApi:
     return client.CustomObjectsApi()
 

@@ -2,7 +2,7 @@ import time
 
 from kubernetes import client
 
-from helpers import resource_name
+from helpers import policy_peers, resource_name
 
 
 def _get_container(pod_spec: client.V1PodSpec, name: str) -> client.V1Container:
@@ -207,6 +207,41 @@ def test_config_and_secret_mapping(
         secret_refs = [ref.secret_ref.name for ref in env_from if ref.secret_ref]
         assert config_name in config_refs
         assert secret_name in secret_refs
+
+
+def test_api_pdb_and_anti_affinity(
+    apps_api: client.AppsV1Api,
+    policy_api: client.PolicyV1Api,
+    namespace: str,
+    release_name: str,
+) -> None:
+    pdb = policy_api.read_namespaced_pod_disruption_budget(
+        resource_name(release_name, "api"), namespace,
+    )
+    assert int(str(pdb.spec.min_available)) == 1
+
+    preferred = (
+        apps_api.read_namespaced_deployment(resource_name(release_name, "api"), namespace)
+        .spec.template.spec.affinity.pod_anti_affinity
+        .preferred_during_scheduling_ignored_during_execution
+    )
+    assert preferred and preferred[0].pod_affinity_term.topology_key == "kubernetes.io/hostname"
+
+
+def test_network_policies(
+    networking_api: client.NetworkingV1Api,
+    namespace: str,
+    release_name: str,
+) -> None:
+    def np(name: str):
+        return networking_api.read_namespaced_network_policy(
+            resource_name(release_name, name), namespace,
+        )
+
+    assert policy_peers(np("redis"), pods=True) == {"api", "worker"}
+    assert policy_peers(np("mongo"), pods=True) == {"api", "worker"}
+    assert policy_peers(np("api")) == {"ingress-nginx", "monitoring"}
+    assert policy_peers(np("web")) == {"ingress-nginx"}
 
 
 def test_api_hpa_has_live_metrics(

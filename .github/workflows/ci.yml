@@ -125,13 +125,21 @@ jobs:
             | tar -xz kubeconform
           sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
 
-      - name: Helm lint
+      - name: Helm lint app chart
         run: helm lint infra/helm/arqh-platform -f infra/helm/arqh-platform/values-ci.yaml
 
-      - name: Render chart
+      - name: Render app chart
         run: |
           helm template arqh infra/helm/arqh-platform \
             -f infra/helm/arqh-platform/values-ci.yaml > "${RUNNER_TEMP}/rendered.yaml"
 
       - name: Validate rendered manifests
         run: kubeconform -strict -summary "${RUNNER_TEMP}/rendered.yaml"
+
+      - name: Lint monitoring chart
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+          helm dependency build infra/helm/monitoring
+          helm lint infra/helm/monitoring

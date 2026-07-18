@@ -101,7 +101,8 @@ Browser ──HTTPS──▶ ingress-nginx ─┬─ /api/*  ─▶ arqh-api  (C
 
 ### Operations
 
-- **Scaling (HPA):** `kubectl get hpa -n arqh` — the API autoscales on CPU 70% / memory 80% (min 2, max 5).
+- **Scaling (HPA):** `kubectl get hpa -n arqh` — API scales on CPU 70% / memory 80% (min 2, max 5).
+- **Resilience:** API PDB (`minAvailable: 1`) + soft anti-affinity; NetworkPolicies lock Redis/Mongo to api/worker.
 - **Rolling update:** rebuild + `kind load`, then `helm upgrade arqh infra/helm/arqh-platform -n arqh`.
 - **Inspect probes:** `kubectl describe deploy arqh-api -n arqh` — readiness `/api/health` (dependency-aware),
   liveness/startup `/api/live` (dependency-free, so a Redis blip never triggers a restart loop).
@@ -192,8 +193,7 @@ KUBECONFIG=~/.kube/config \
   .tmp/infra-venv/bin/python -m pytest tests/infra -v
 ```
 
-- `tests/infra/test_cluster_state.py` — deployments/statefulsets Ready, split probes, requests+limits,
-  ConfigMap/Secret separation, HPA metrics populated, Ingress TLS + split routing + header rewrites.
+- `tests/infra/test_cluster_state.py` — Ready workloads, probes, resources, secrets, HPA, PDB, NetworkPolicies, Ingress.
 - `tests/infra/test_smoke_e2e.py` — health, hydration, assign round-trip, optimize pipeline, SSE, `/metrics` non-exposure.
 - `tests/infra/test_probe_resilience.py` — deleting a Redis pod degrades readiness (not liveness) and recovers.
 - `tests/infra/test_monitoring.py` — monitoring workloads Ready, ServiceMonitor, Grafana ingress, Prometheus scrapes `arqh-api`.
@@ -623,7 +623,7 @@ GitHub Actions now covers both **quality gates** and **image packaging**:
   - runs web ESLint (`bun run lint`)
   - runs Prettier format check (`bun run format:check`)
   - runs Dockerfile lint (`hadolint`)
-  - lints and renders the Helm chart (`helm lint` + `kubeconform` with `values-ci.yaml` / `sha-ci` tags)
+  - lints/renders the app chart (`values-ci.yaml`) and lints the monitoring chart
   - runs the API integration suite against real Redis + MongoDB service containers (`bun run test`)
 
 - **`kind-smoke.yml`** runs on pull requests and pushes to `main`:
@@ -684,6 +684,8 @@ and the next step.
 | Multi-stage `FROM` ARGs | **Global ARG before first `FROM`**        | ARG only before second stage       | BuildKit otherwise resolves `${NGINX_IMAGE}` blank in CI                                | —                                                      |
 | Infra tests             | **pytest + k8s client** via Ingress       | Bash + kubectl / Terratest         | Readable assertions; no port-forward for app smoke (Prometheus scrape is the exception) | kind-in-CI smoke                                       |
 | API replicas            | **min 2 + CPU/mem HPA**                   | Single replica                     | Exercises multi-pod behavior early; needs shared SSE bus                                | Tune HPA thresholds                                    |
+| API disruption          | **PDB + soft anti-affinity**              | No PDB                             | Drain-safe; still schedules on 1-node kind                                              | —                                                      |
+| NetworkPolicy           | **Datastore allowlists**                  | Open namespace                     | Redis/Mongo only from api/worker; api/web from Ingress                                  | —                                                      |
 | SSE fan-out             | **Redis Pub/Sub (`sse:live`)**            | Sticky sessions / in-memory only   | Mutations on pod B reach SSE clients on pod A; replay still via Redis Stream            | Consider Redis Streams consumer group if fan-out grows |
 | Worker scaling          | **CPU HPA (optional)**                    | KEDA on stream lag                 | Simple for the demo; not lag-aware                                                      | KEDA on `events:stream` lag                            |
 | TLS (local)             | **Self-signed secret per host**           | cert-manager                       | Zero extra controllers; browser warning + manual cert                                   | cert-manager in real envs                              |

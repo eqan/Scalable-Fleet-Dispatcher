@@ -17,6 +17,16 @@ spec:
       terminationGracePeriodSeconds: 20
       securityContext:
         fsGroup: 1000
+      # Soft spread across nodes (ok on single-node kind).
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "arqh.selectorLabels" (dict "root" . "name" "api") | nindent 20 }}
       containers:
         - name: api
           image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
