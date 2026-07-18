@@ -1,16 +1,17 @@
-imagePullPolicy: Always
+# CI overlay for helm lint/template. Immutable tags only — never :latest.
+imagePullPolicy: IfNotPresent
 
 api:
   image:
-    repository: ghcr.io/example/arqh-api
-    tag: latest
+    repository: arqh-api
+    tag: sha-ci
 
 worker:
   image:
-    repository: ghcr.io/example/arqh-worker
-    tag: latest
+    repository: arqh-worker
+    tag: sha-ci
 
 web:
   image:
-    repository: ghcr.io/example/arqh-web
-    tag: latest
+    repository: arqh-web
+    tag: sha-ci

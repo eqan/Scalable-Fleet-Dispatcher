@@ -622,8 +622,12 @@ GitHub Actions now covers both **quality gates** and **image packaging**:
   - type-checks all workspaces (`bun run typecheck`)
   - runs web ESLint (`bun run lint`)
   - runs Dockerfile lint (`hadolint`)
-  - lints and renders the Helm chart (`helm lint` + `kubeconform`)
+  - lints and renders the Helm chart (`helm lint` + `kubeconform` with `values-ci.yaml` / `sha-ci` tags)
   - runs the API integration suite against real Redis + MongoDB service containers (`bun run test`)
+
+- **`kind-smoke.yml`** runs on pull requests and pushes to `main`:
+  - `./run-platform.sh up` with `IMAGE_TAG=sha-<git-sha>` and `SKIP_MONITORING=1`
+  - Pillar C pytest through the Ingress (monitoring suite skipped with the stack)
 
 - **`build.yml`** runs on pushes to `main` and `workflow_dispatch`:
   - builds `api`, `worker`, and `web` with Docker Buildx

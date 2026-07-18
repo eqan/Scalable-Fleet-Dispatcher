@@ -39,9 +39,14 @@ INFRA_VENV="$ROOT_DIR/.tmp/infra-venv"
 INGRESS_NGINX_VERSION="controller-v1.11.1"
 METRICS_SERVER_VERSION="v0.7.2"
 
-API_IMAGE="arqh-api:local"
-WORKER_IMAGE="arqh-worker:local"
-WEB_IMAGE="arqh-web:local"
+# IMAGE_TAG=local on a laptop; CI sets IMAGE_TAG=sha-<git-sha>.
+IMAGE_TAG="${IMAGE_TAG:-local}"
+API_IMAGE="arqh-api:${IMAGE_TAG}"
+WORKER_IMAGE="arqh-worker:${IMAGE_TAG}"
+WEB_IMAGE="arqh-web:${IMAGE_TAG}"
+
+# SKIP_MONITORING=1 = app+ingress only (kind-in-CI); also skips monitoring pytest.
+SKIP_MONITORING="${SKIP_MONITORING:-0}"
 
 log()  { printf '\033[1;34m[platform]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*"; }
@@ -410,10 +415,16 @@ install_monitoring_stack() {
 
 cmd_deps() {
   ensure_ns "$K8S_NAMESPACE"
-  ensure_ns "$MONITORING_NAMESPACE"
   install_metrics_server
   install_ingress_nginx
   ensure_tls_secret
+
+  if [ "$SKIP_MONITORING" = "1" ]; then
+    log "SKIP_MONITORING=1 — skipping observability stack (app + ingress only)"
+    return 0
+  fi
+
+  ensure_ns "$MONITORING_NAMESPACE"
   install_monitoring_stack
 }
 
@@ -444,10 +455,13 @@ cmd_deploy() {
   build_local_images
   load_images_into_kind
 
-  log "Deploying Helm release ${RELEASE_NAME} into namespace ${K8S_NAMESPACE} ..."
+  log "Deploying Helm release ${RELEASE_NAME} (images :${IMAGE_TAG}) ..."
   helm upgrade --install "$RELEASE_NAME" "$CHART_DIR" \
     --namespace "$K8S_NAMESPACE" \
     --create-namespace \
+    --set api.image.tag="$IMAGE_TAG" \
+    --set worker.image.tag="$IMAGE_TAG" \
+    --set web.image.tag="$IMAGE_TAG" \
     --set ingress.host="$INGRESS_HOST" \
     --set ingress.tls.secretName="$TLS_SECRET_NAME"
 
@@ -489,13 +503,18 @@ cmd_smoke() {
   "$INFRA_VENV/bin/python" -m pip install --quiet -r tests/infra/requirements.txt
 
   log "Running infra tests through the ingress ..."
+  local -a pytest_args=(tests/infra -v)
+  if [ "$SKIP_MONITORING" = "1" ]; then
+    pytest_args+=(--ignore=tests/infra/test_monitoring.py)
+  fi
+
   INGRESS_HOST="$INGRESS_HOST" \
   GRAFANA_HOST="$GRAFANA_HOST" \
   K8S_NAMESPACE="$K8S_NAMESPACE" \
   MONITORING_NAMESPACE="$MONITORING_NAMESPACE" \
   RELEASE_NAME="$RELEASE_NAME" \
   KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}" \
-  "$INFRA_VENV/bin/python" -m pytest tests/infra -v
+  "$INFRA_VENV/bin/python" -m pytest "${pytest_args[@]}"
 }
 
 cmd_up() {
@@ -505,7 +524,10 @@ cmd_up() {
   cmd_deps
   cmd_deploy
   cmd_smoke
-  log "Platform is green. App: https://${INGRESS_HOST}  |  Grafana: https://${GRAFANA_HOST}"
+  log "Platform is green. App: https://${INGRESS_HOST}"
+  if [ "$SKIP_MONITORING" != "1" ]; then
+    log "Grafana: https://${GRAFANA_HOST}"
+  fi
 }
 
 cmd_down() {
@@ -615,11 +637,13 @@ Submission-default Kubernetes commands:
   preflight      Check required tooling (docker, kind, kubectl, helm, curl, openssl, python3)
   env            Create .env / .env.docker from the tracked examples if missing
   cluster        Create the local kind cluster from infra/kind/kind-cluster.yaml
-  deps           Install metrics-server, ingress-nginx, monitoring stack, and local TLS secrets
-  deploy         Build local images, load them into kind, and helm upgrade/install the release
-  smoke          Wait for ingress health, then run pytest tests/infra -v
+  deps           metrics-server + ingress-nginx + TLS (+ monitoring unless SKIP_MONITORING=1)
+  deploy         Build/load images (IMAGE_TAG, default: local) and helm upgrade/install
+  smoke          Ingress health + pytest tests/infra
   up             Preflight -> env -> cluster -> deps -> deploy -> smoke
   bootstrap      Alias for 'up'
+
+  Env: IMAGE_TAG=local|sha-<git-sha>   SKIP_MONITORING=0|1
   down           Uninstall monitoring + app releases, then kind delete cluster
   logs [name]    Tail logs for api|worker|web|redis|mongo|grafana|prometheus|loki (default: api)
   ps             Show app + monitoring workloads

@@ -1,0 +1,53 @@
+name: Kind Smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kind-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# App + Ingress smoke on kind. Skips monitoring to fit GitHub-hosted runners
+# (full stack: make bootstrap).
+jobs:
+  kind-smoke:
+    name: kind deploy + infra smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.15.4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.30.4
+
+      - name: Install kind
+        uses: helm/kind-action@v1
+        with:
+          install_only: true
+          version: v0.23.0
+
+      - name: Bootstrap, deploy, smoke
+        env:
+          IMAGE_TAG: sha-${{ github.sha }}
+          SKIP_MONITORING: "1"
+        run: ./run-platform.sh up
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get nodes,pods,svc,ingress,hpa -A || true
+          kubectl -n arqh logs -l app.kubernetes.io/name=api --tail=80 || true
