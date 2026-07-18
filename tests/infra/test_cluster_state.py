@@ -230,6 +230,7 @@ def test_api_hpa_has_live_metrics(
 
 def test_ingress_is_configured_for_tls_and_split_routing(
     networking_api: client.NetworkingV1Api,
+    core_api: client.CoreV1Api,
     namespace: str,
     release_name: str,
     ingress_host: str,
@@ -256,3 +257,11 @@ def test_ingress_is_configured_for_tls_and_split_routing(
 
     annotations = ingress.metadata.annotations or {}
     assert annotations["nginx.ingress.kubernetes.io/proxy-buffering"] == "off"
+
+    headers_name = resource_name(release_name, "ingress-headers")
+    assert annotations["nginx.ingress.kubernetes.io/proxy-set-headers"] == (
+        f"{namespace}/{headers_name}"
+    )
+    headers = core_api.read_namespaced_config_map(headers_name, namespace).data or {}
+    assert headers["X-Forwarded-Proto"] == "https"
+    assert headers["X-Forwarded-Port"] == "443"
