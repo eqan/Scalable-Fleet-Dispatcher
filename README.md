@@ -304,12 +304,219 @@ Note: development rate limits can dominate this benchmark and produce `429`-heav
 
 ## Architecture Overview
 
-See each app's README for deep dives:
+Platform topology, Ingress, probes, data flows, observability, bootstrap, Helm, CI/CD, and infra tests:
 
-- **[apps/api/README.md](apps/api/README.md)** -- Backend architecture, Lua scripts, Redis keyspace, hydration flow, SOLID/DRY principles
-- **[apps/web/README.md](apps/web/README.md)** -- Frontend architecture, state management, SSE sync engine, component structure
+App deep dives: [`apps/api/README.md`](apps/api/README.md) · [`apps/web/README.md`](apps/web/README.md)
 
-### Core Data Flow
+### Platform topology (kind)
+
+```mermaid
+flowchart TB
+  subgraph Host["Laptop / Docker Desktop"]
+    Browser["Browser"]
+    Bootstrap["run-platform.sh / make bootstrap"]
+  end
+
+  subgraph Kind["kind cluster: arqh<br/>infra/kind/kind-cluster.yaml"]
+    ING["ingress-nginx<br/>:80/:443"]
+
+    subgraph NS_ARQH["namespace: arqh"]
+      WEB["web<br/>nginx-unprivileged :8080"]
+      API["api ×2<br/>Bun/Express :4000"]
+      WRK["worker ×1<br/>Bun optimizer"]
+      REDIS[("redis STS<br/>hot + streams")]
+      MONGO[("mongo STS<br/>durable")]
+    end
+
+    subgraph NS_MON["namespace: monitoring"]
+      PROM["Prometheus"]
+      GRAF["Grafana"]
+      LOKI["Loki"]
+      PT["Promtail DS"]
+      SMO["ServiceMonitor<br/>arqh-api /metrics"]
+    end
+
+    MS["metrics-server"]
+  end
+
+  Browser -->|HTTPS| ING
+  ING -->|"/ → web"| WEB
+  ING -->|"/api → api"| API
+  Browser -->|HTTPS grafana host| GRAF
+
+  API ⇄ REDIS
+  API ⇄ MONGO
+  WRK ⇄ REDIS
+  API -.->|ClusterIP scrape| SMO
+  SMO --> PROM
+  PT -->|pod logs| LOKI
+  PROM --> GRAF
+  LOKI --> GRAF
+  MS -.->|CPU/mem| API
+
+  Bootstrap -->|kind + helm + pytest| Kind
+```
+
+### Traffic through Ingress (TLS termination)
+
+HTTPS is decrypted at Ingress; pods get plain HTTP in-cluster. `/metrics` is scraped via ClusterIP only (not an Ingress path).
+
+```mermaid
+flowchart LR
+  C["Browser"] -->|"1. HTTPS encrypted"| ING["Ingress<br/>TLS termination<br/>decrypt + route"]
+
+  ING -->|"2a. path /api<br/>HTTP in-cluster"| API["Service arqh-api<br/>→ pods :4000"]
+  ING -->|"2b. path /<br/>HTTP in-cluster"| WEB["Service arqh-web<br/>→ pods :8080"]
+
+  API --> H["/api/health · /api/live"]
+  API --> E["/api/events SSE"]
+  API --> D["/api/state · mutations · optimize"]
+  WEB --> SPA["React static assets"]
+
+  PROM["Prometheus<br/>in monitoring ns"] -->|"3. scrape ClusterIP<br/>never via Ingress"| M["API /metrics"]
+```
+
+### Workloads & scaling
+
+```mermaid
+flowchart TB
+  HPA_A["HPA arqh-api<br/>min 2 · max 5<br/>CPU + memory"] -->|scale| API["Deployment api"]
+  HPA_W["HPA worker<br/>disabled by default"] -.-> WRK["Deployment worker"]
+
+  WEB["Deployment web ×1"]
+  REDIS["StatefulSet redis ×1"]
+  MONGO["StatefulSet mongo ×1"]
+```
+
+### Probe contract (readiness ≠ liveness)
+
+```mermaid
+sequenceDiagram
+  participant K as kubelet
+  participant A as api pod
+  participant R as Redis
+  participant M as Mongo
+
+  Note over K,A: startup / liveness → /api/live (dependency-free)
+  K->>A: GET /api/live
+  A-->>K: 200 alive
+
+  Note over K,A: readiness → /api/health (deps)
+  K->>A: GET /api/health
+  A->>R: ping
+  A->>M: ping
+  alt both up
+    A-->>K: 200 healthy → Ready → gets traffic
+  else redis or mongo down
+    A-->>K: 503 degraded → NotReady → no traffic<br/>(no restart)
+  end
+```
+
+### Data & async flows
+
+```mermaid
+flowchart TB
+  UI["Browser"] -->|mutations /api/*| API["API pods"]
+  UI -->|SSE /api/events| API
+
+  API -->|"Lua mutations"| REDIS[("Redis hot")]
+  API -->|"POST /api/save"| MONGO[("Mongo durable")]
+  API -->|"boot hydrate"| MONGO
+  API -->|"XADD events:stream"| REDIS
+  WRK["Worker"] -->|"XREADGROUP"| REDIS
+  WRK -->|"XADD results:stream"| REDIS
+  API -->|"consume results"| REDIS
+
+  API -->|"XADD sse:replay<br/>PUBLISH sse:live"| REDIS
+  REDIS -.->|"SUBSCRIBE sse:live<br/>all replicas"| API
+```
+
+### Observability pipeline
+
+```mermaid
+flowchart LR
+  API["arqh-api :4000"] -->|"/metrics"| SM["ServiceMonitor"]
+  SM --> PROM["Prometheus"]
+  PODS["All pods"] --> PT["Promtail"]
+  PT --> LOKI["Loki"]
+  PROM --> GRAF["Grafana"]
+  LOKI --> GRAF
+  GRAF --> D1["api-overview"]
+  GRAF --> D2["platform-observability"]
+```
+
+### Bootstrap lifecycle
+
+```mermaid
+flowchart TD
+  A["preflight"] --> B["env"]
+  B --> C["cluster<br/>kind create"]
+  C --> D["deps"]
+  D --> D1["metrics-server"]
+  D --> D2["ingress-nginx"]
+  D --> D3["TLS secrets"]
+  D --> D4["helm monitoring"]
+  D --> E["deploy"]
+  E --> E1["docker build ×3"]
+  E --> E2["kind load"]
+  E --> E3["helm upgrade arqh"]
+  E --> F["smoke<br/>pytest tests/infra"]
+  F --> G["green"]
+```
+
+### Helm releases & render path
+
+```mermaid
+flowchart TB
+  BOOT["run-platform.sh"] --> DEP["helm upgrade --install monitoring<br/>infra/helm/monitoring<br/>-n monitoring"]
+  BOOT --> APP["helm upgrade --install arqh<br/>infra/helm/arqh-platform<br/>-n arqh"]
+
+  DEP --> M["Release: monitoring<br/>Prometheus, Grafana, Loki, Promtail, ServiceMonitor"]
+  APP --> A["Release: arqh<br/>api, worker, web, redis, mongo, Ingress"]
+```
+
+```mermaid
+flowchart LR
+  V["values.yaml<br/>ingress.host=…"] --> H["helm template / upgrade"]
+  R["Release.Name=arqh"] --> H
+  T["templates/ingress.yaml<br/>{{ .Values… }}"] --> H
+  P["_helpers.tpl<br/>componentName"] --> H
+  H --> Y["Rendered YAML<br/>name: arqh-ingress<br/>host: arqh.localtest.me"]
+  Y --> K["kubectl / Helm → API server"]
+  K --> O["Ingress object live in cluster"]
+```
+
+### CI/CD
+
+```mermaid
+flowchart LR
+  PR["PR / push main"] --> CI["ci.yml"]
+  CI --> T["typecheck + lint"]
+  CI --> I["api integration tests<br/>Redis+Mongo services"]
+  CI --> H["hadolint ×3 Dockerfiles"]
+  CI --> V["helm lint + template<br/>+ kubeconform"]
+
+  MAIN["push main"] --> B["build.yml"]
+  B --> P["build + push to GHCR<br/>ghcr.io/…/arqh-api, worker, web<br/>tag = git SHA"]
+```
+
+### Infra tests & config
+
+```mermaid
+flowchart TB
+  S["make smoke / pytest tests/infra"] --> CS["test_cluster_state"]
+  S --> SM["test_smoke_e2e"]
+  S --> PR["test_probe_resilience"]
+  S --> MO["test_monitoring"]
+```
+
+```mermaid
+flowchart LR
+  CM["ConfigMap<br/>PORT · REDIS_HOST · MONGO_URI · CORS_ORIGIN · …"] --> POD["api / worker pods"]
+  SEC["Secret<br/>REDIS_PASSWORD · …"] --> POD
+```
+
+### Core Data Flow (app)
 
 ```
 User Action → Frontend (optimistic UI update)
@@ -458,7 +665,7 @@ Private -- Arqh
 ## Architecture Comparison Matrix (Pillar A + B + C + D)
 
 Every non-obvious infrastructure decision, its chosen option, the main alternative, the trade-off,
-and the next step. Decision detail lives in [`docs/conventions.md`](docs/conventions.md).
+and the next step.
 
 | Decision | Chosen | Alternative | Why chosen / trade-off | Next step |
 |----------|--------|-------------|------------------------|-----------|
