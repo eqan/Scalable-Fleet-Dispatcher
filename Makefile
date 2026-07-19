@@ -5,7 +5,7 @@
 SHELL := /usr/bin/env bash
 
 .DEFAULT_GOAL := help
-.PHONY: help bootstrap boostrap preflight env cluster deps deploy up down smoke logs ps test compose-preflight compose-up compose-down compose-smoke compose-logs compose-ps
+.PHONY: help bootstrap boostrap preflight env cluster deps deploy up down smoke logs ps test format install-hooks compose-preflight compose-up compose-down compose-smoke compose-logs compose-ps
 
 help: ## Show available targets
 	@./run-platform.sh help
@@ -48,6 +48,12 @@ ps: ## Show app and monitoring workload status
 
 test: ## Run the API integration test suite (requires bun + local Redis/Mongo)
 	@bun run test
+
+format: ## Apply Prettier to CI-scoped files (same set as format:check)
+	@bun run format
+
+install-hooks: ## Install local git pre-commit hook (auto-format before commit)
+	@./scripts/install-git-hooks.sh
 
 compose-preflight: ## Check Docker Compose prerequisites
 	@./run-platform.sh compose-preflight

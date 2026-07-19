@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Auto-format Prettier-scoped files before the commit is created, then re-stage
+# any rewritten paths so `format:check` in CI stays green.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "[pre-commit] bun not found — skip format (CI will still enforce format:check)" >&2
+  exit 0
+fi
+
+staged="$(git diff --cached --name-only --diff-filter=ACM || true)"
+if [[ -z "${staged}" ]]; then
+  exit 0
+fi
+
+# Only run when a Prettier-scoped path is staged.
+if ! grep -qE '^(README\.md|\.github/workflows/[^/]+\.yml|[^/]+\.json|apps/[^/]+/package\.json|infra/kind/[^/]+\.yaml|infra/helm/arqh-platform/Chart\.yaml|infra/helm/arqh-platform/values[^/]*\.yaml)$' <<<"${staged}"; then
+  exit 0
+fi
+
+echo "[pre-commit] Running bun run format ..."
+bun run format
+
+# Re-stage scoped files that were already part of this commit and may have been rewritten.
+while IFS= read -r path; do
+  [[ -z "${path}" ]] && continue
+  if [[ -f "${path}" ]] && git diff --cached --name-only | grep -qxF "${path}"; then
+    git add -- "${path}"
+  fi
+done <<<"${staged}"
