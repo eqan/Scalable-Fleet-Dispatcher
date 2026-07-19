@@ -75,9 +75,12 @@ def test_redis_failure_flips_readiness_without_restarting_api(
 
     assert degraded, "readiness never degraded after deleting the redis pod"
 
-    # Wait for Redis, both API replicas, and ingress health — a single 200 can
-    # land while the other replica is still NotReady after ioredis reconnects.
+    # Wait for Redis + both API pods Ready, then require consecutive healthy
+    # ingress responses. One 200 can hit the recovered replica while the other
+    # still reports degraded after ioredis reconnects (round-robin Service).
     recovery_deadline = time.time() + 180
+    consecutive_healthy = 0
+    required_healthy = 8
     while time.time() < recovery_deadline:
         statefulset = apps_api.read_namespaced_stateful_set(
             resource_name(release_name, "redis"), namespace
@@ -88,10 +91,16 @@ def test_redis_failure_flips_readiness_without_restarting_api(
             try:
                 response = http.get(f"{base_url}/api/health", timeout=10)
                 if response.status_code == 200 and response.json().get("status") == "healthy":
-                    break
+                    consecutive_healthy += 1
+                    if consecutive_healthy >= required_healthy:
+                        break
+                else:
+                    consecutive_healthy = 0
             except requests.RequestException:
-                pass
-        time.sleep(3)
+                consecutive_healthy = 0
+        else:
+            consecutive_healthy = 0
+        time.sleep(0.5)
     else:
         raise AssertionError("redis did not recover and restore API health in time")
 

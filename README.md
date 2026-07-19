@@ -195,7 +195,7 @@ KUBECONFIG=~/.kube/config \
 
 - `tests/infra/test_cluster_state.py` — Ready workloads, probes, resources, secrets, HPA, PDB, NetworkPolicies, Ingress.
 - `tests/infra/test_smoke_e2e.py` — health, hydration, assign round-trip, optimize pipeline, SSE, `/metrics` non-exposure.
-- `tests/infra/test_probe_resilience.py` — deleting a Redis pod degrades readiness (not liveness) and recovers.
+- `tests/infra/test_zz_probe_resilience.py` — deleting a Redis pod degrades readiness (not liveness) and recovers (runs last).
 - `tests/infra/test_monitoring.py` — monitoring workloads Ready, ServiceMonitor, Grafana ingress, Prometheus scrapes `arqh-api`.
 
 ### Teardown
@@ -504,7 +504,7 @@ flowchart LR
 flowchart TB
   S["make smoke / pytest tests/infra"] --> CS["test_cluster_state"]
   S --> SM["test_smoke_e2e"]
-  S --> PR["test_probe_resilience"]
+  S --> PR["test_zz_probe_resilience"]
   S --> MO["test_monitoring"]
 ```
 
