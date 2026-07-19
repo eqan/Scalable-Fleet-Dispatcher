@@ -26,7 +26,8 @@
 │   ├── shared/              @repo/shared -- Zod schemas & inferred types
 │   └── monitoring/          Grafana/Prometheus/Loki/Promtail assets
 │       ├── grafana/provisioning/   Compose-mounted datasources + dashboards
-│       └── grafana/k8s/            K8s-only datasource URLs (not mounted by Compose)
+│       ├── grafana/k8s/            K8s-only datasource URLs (not mounted by Compose)
+│       └── grafana/screenshots/    Live dashboard captures for the runbook
 ├── apps/
 │   ├── api/                 Express API + Redis Lua scripts + Worker
 │   └── web/                 React + Vite + Zustand + TanStack Query
@@ -159,6 +160,10 @@ Browser ──HTTPS──▶ ingress-nginx ─┬─ /api/*  ─▶ arqh-api  (C
    | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
    | **Arqh API Overview**           | Request heatmap, request count by route, 4xx/5xx rates, process CPU/mem, API logs                                              |
    | **Arqh Platform Observability** | Pod restarts, error-log spikes, API 5xx by route, capacity vs requests/limits, Redis/Mongo dependency latency, request heatmap |
+
+   Live capture from this cluster (**Arqh API Overview** — heatmap, route rates, error rates, CPU/mem):
+
+   ![Arqh API Overview Grafana dashboard](packages/monitoring/grafana/screenshots/grafana-dashboard.png)
 
 6. **Generate a little traffic** so panels are not empty:
 
@@ -581,6 +586,8 @@ Operator walkthrough (creds, dashboards, smoke signals): see [How to check monit
 | **Arqh API Overview**           | Request heatmap, count by route, 4xx/5xx rates, CPU/mem, API logs                              |
 | **Arqh Platform Observability** | Pod restarts, error-log spikes, 5xx by route, capacity vs limits, Redis/Mongo latency, heatmap |
 
+Screenshot: [How to check monitoring](#how-to-check-monitoring-operator-walkthrough) (live **Arqh API Overview** capture).
+
 ### Log Aggregation (Loki + Promtail)
 
 - **Compose:** `{service="api"} \| json`
@@ -643,22 +650,20 @@ The Docker integration tests (`tests/integration-docker.ts`) are excluded from C
 
 ## Tech Stack
 
-| Layer          | Technology                                                |
-| -------------- | --------------------------------------------------------- |
-| Runtime        | Bun                                                       |
-| API Framework  | Express 5                                                 |
-| Language       | TypeScript (strict mode)                                  |
-| Hot State      | Redis + ioredis + Lua scripting                           |
-| Durable State  | MongoDB (native driver)                                   |
-| Messaging      | Redis Streams (consumer groups)                           |
-| Real-time      | Server-Sent Events (SSE)                                  |
-| Validation     | Zod 4 (schema-first type inference)                       |
-| Frontend       | React 19 + Vite 7 + Zustand + TanStack Query              |
-| Map            | React Leaflet (bonus feature)                             |
-| Security       | Helmet + CORS + express-rate-limit                        |
-| Logging        | Pino (structured JSON)                                    |
-| Observability  | Prometheus + Grafana + Loki (K8s Helm + Compose fallback) |
-| Infrastructure | Docker, kind, Helm, ingress-nginx, GitHub Actions         |
+Platform / infrastructure scope only (app baseline — Express, React, Zod, etc. — was given frozen):
+
+| Layer            | Technology                                                              |
+| ---------------- | ----------------------------------------------------------------------- |
+| Local cluster    | kind (1 control-plane + 2 workers)                                      |
+| Packaging        | Helm (`arqh-platform` + `monitoring` charts)                            |
+| Ingress / TLS    | ingress-nginx, path split, `proxy-set-headers`, self-signed secrets     |
+| Workloads        | Deployments + StatefulSets (Redis/Mongo), HPA, PDB, NetworkPolicy       |
+| Containers       | Docker multi-stage builds, `nginx-unprivileged`, non-root, no `:latest` |
+| Bootstrap        | `run-platform.sh` / `make bootstrap`                                    |
+| CI/CD            | GitHub Actions (`ci`, `kind-smoke`, `build`) → GHCR SHA tags            |
+| Infra tests      | pytest + Kubernetes Python client (Ingress HTTPS, no port-forward)      |
+| Observability    | kube-prometheus-stack, Grafana, Loki, Promtail, ServiceMonitor          |
+| Compose fallback | Docker Compose (`compose-*`) — not the submission path                  |
 
 ## License
 
