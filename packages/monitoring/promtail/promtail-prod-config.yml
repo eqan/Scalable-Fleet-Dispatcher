@@ -14,31 +14,31 @@ scrape_configs:
     static_configs:
       - targets: ["localhost"]
         labels:
-          job: "arqh-api"
+          job: "dispatch-api"
           service: "api"
           stream: "stdout"
-          __path__: /var/log/pm2/arqh-api-out.log
+          __path__: /var/log/pm2/dispatch-api-out.log
 
       - targets: ["localhost"]
         labels:
-          job: "arqh-api"
+          job: "dispatch-api"
           service: "api"
           stream: "stderr"
-          __path__: /var/log/pm2/arqh-api-error.log
+          __path__: /var/log/pm2/dispatch-api-error.log
 
   # ---- PM2 Worker logs ----
   - job_name: pm2-worker
     static_configs:
       - targets: ["localhost"]
         labels:
-          job: "arqh-worker"
+          job: "dispatch-worker"
           service: "worker"
           stream: "stdout"
-          __path__: /var/log/pm2/arqh-worker-out.log
+          __path__: /var/log/pm2/dispatch-worker-out.log
 
       - targets: ["localhost"]
         labels:
-          job: "arqh-worker"
+          job: "dispatch-worker"
           service: "worker"
           stream: "stderr"
-          __path__: /var/log/pm2/arqh-worker-error.log
+          __path__: /var/log/pm2/dispatch-worker-error.log

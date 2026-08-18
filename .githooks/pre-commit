@@ -17,7 +17,7 @@ if [[ -z "${staged}" ]]; then
 fi
 
 # Only run when a Prettier-scoped path is staged.
-if ! grep -qE '^(README\.md|\.github/workflows/[^/]+\.yml|[^/]+\.json|apps/[^/]+/package\.json|infra/kind/[^/]+\.yaml|infra/helm/arqh-platform/Chart\.yaml|infra/helm/arqh-platform/values[^/]*\.yaml)$' <<<"${staged}"; then
+if ! grep -qE '^(README\.md|\.github/workflows/[^/]+\.yml|[^/]+\.json|apps/[^/]+/package\.json|infra/kind/[^/]+\.yaml|infra/helm/dispatch-platform/Chart\.yaml|infra/helm/dispatch-platform/values[^/]*\.yaml)$' <<<"${staged}"; then
   exit 0
 fi
 

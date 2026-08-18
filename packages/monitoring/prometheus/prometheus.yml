@@ -3,9 +3,9 @@ global:
   evaluation_interval: 5s
 
 scrape_configs:
-  - job_name: "arqh-api"
+  - job_name: "dispatch-api"
     metrics_path: /metrics
     static_configs:
       - targets: ["api:4000"]
         labels:
-          service: "arqh-api"
+          service: "dispatch-api"

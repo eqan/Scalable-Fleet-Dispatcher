@@ -31,7 +31,7 @@ def _assert_labels(
     labels = metadata.labels or {}
     assert labels.get("app.kubernetes.io/name") == component_name
     assert labels.get("app.kubernetes.io/instance") == release_name
-    assert labels.get("app.kubernetes.io/part-of") == "arqh-platform"
+    assert labels.get("app.kubernetes.io/part-of") == "dispatch-platform"
     assert labels.get("app.kubernetes.io/component") == component_kind
     assert labels.get("app.kubernetes.io/managed-by") == "Helm"
 

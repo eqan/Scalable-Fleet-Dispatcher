@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ================================================================
-# Arqh Platform Control Script
+# Platform Control Script
 #
 # Submission-default path:
 #   kind cluster -> ingress-nginx + metrics-server -> local image load
@@ -19,17 +19,17 @@ COMPOSE_FILE="docker-compose.yml"
 DEBUG_COMPOSE_FILE="docker-compose.debug.yml"
 ENV_FILE=".env.docker"
 
-KIND_CLUSTER_NAME="arqh"
+KIND_CLUSTER_NAME="dispatch"
 KIND_CONFIG="infra/kind/kind-cluster.yaml"
-K8S_NAMESPACE="arqh"
-RELEASE_NAME="arqh"
-CHART_DIR="infra/helm/arqh-platform"
-INGRESS_HOST="${INGRESS_HOST:-arqh.localtest.me}"
-TLS_SECRET_NAME="arqh-local-tls"
+K8S_NAMESPACE="dispatch"
+RELEASE_NAME="dispatch"
+CHART_DIR="infra/helm/dispatch-platform"
+INGRESS_HOST="${INGRESS_HOST:-dispatch.localtest.me}"
+TLS_SECRET_NAME="dispatch-local-tls"
 MONITORING_NAMESPACE="monitoring"
 MONITORING_RELEASE_NAME="monitoring"
 MONITORING_CHART_DIR="infra/helm/monitoring"
-GRAFANA_HOST="${GRAFANA_HOST:-grafana.arqh.localtest.me}"
+GRAFANA_HOST="${GRAFANA_HOST:-grafana.dispatch.localtest.me}"
 GRAFANA_TLS_SECRET_NAME="grafana-local-tls"
 GRAFANA_ADMIN_SECRET_NAME="grafana-admin"
 TLS_DIR="$ROOT_DIR/.tmp/k8s/tls"
@@ -41,9 +41,9 @@ METRICS_SERVER_VERSION="v0.7.2"
 
 # IMAGE_TAG=local on a laptop; CI sets IMAGE_TAG=sha-<git-sha>.
 IMAGE_TAG="${IMAGE_TAG:-local}"
-API_IMAGE="arqh-api:${IMAGE_TAG}"
-WORKER_IMAGE="arqh-worker:${IMAGE_TAG}"
-WEB_IMAGE="arqh-web:${IMAGE_TAG}"
+API_IMAGE="dispatch-api:${IMAGE_TAG}"
+WORKER_IMAGE="dispatch-worker:${IMAGE_TAG}"
+WEB_IMAGE="dispatch-web:${IMAGE_TAG}"
 
 # SKIP_MONITORING=1 = app+ingress only (kind-in-CI); also skips monitoring pytest.
 SKIP_MONITORING="${SKIP_MONITORING:-0}"
@@ -360,7 +360,7 @@ apply_monitoring_grafana_assets() {
     kubectl -n "$MONITORING_NAMESPACE" label configmap "monitoring-grafana-dashboard-${dashboard_name}" \
       grafana_dashboard=1 --overwrite >/dev/null
     kubectl -n "$MONITORING_NAMESPACE" annotate configmap "monitoring-grafana-dashboard-${dashboard_name}" \
-      grafana_folder=Arqh --overwrite >/dev/null
+      grafana_folder=Dispatch --overwrite >/dev/null
   done
 }
 
@@ -629,7 +629,7 @@ cmd_compose_ps() {
 
 usage() {
   cat <<'EOF'
-Arqh Platform Control Script
+Platform Control Script
 
 Usage: ./run-platform.sh <command>
 

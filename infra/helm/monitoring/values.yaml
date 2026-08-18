@@ -1,11 +1,11 @@
 serviceMonitor:
-  targetNamespace: arqh
-  targetRelease: arqh
+  targetNamespace: dispatch
+  targetRelease: dispatch
   interval: 15s
   scrapeTimeout: 10s
 
 grafana:
-  host: grafana.arqh.localtest.me
+  host: grafana.dispatch.localtest.me
   tlsSecretName: grafana-local-tls
   adminSecretName: grafana-admin
 
@@ -39,11 +39,11 @@ kube-prometheus-stack:
       annotations:
         nginx.ingress.kubernetes.io/proxy-buffering: "off"
       hosts:
-        - grafana.arqh.localtest.me
+        - grafana.dispatch.localtest.me
       tls:
         - secretName: grafana-local-tls
           hosts:
-            - grafana.arqh.localtest.me
+            - grafana.dispatch.localtest.me
     sidecar:
       dashboards:
         enabled: true
@@ -184,7 +184,7 @@ promtail:
       pipelineStages:
         - cri: {}
       extraRelabelConfigs:
-        # Match dashboard LogQL `{app="arqh-api"}` (instance + name).
+        # Match dashboard LogQL `{app="dispatch-api"}` (instance + name).
         - action: replace
           separator: "-"
           source_labels:

@@ -13,13 +13,13 @@ const httpRequestDuration = new Histogram({
 
 // Updated from /api/health probes — keeps Grafana dependency panels fresh.
 const dependencyLatency = new Gauge({
-  name: "arqh_dependency_latency_ms",
+  name: "dispatch_dependency_latency_ms",
   help: "Latest dependency health-check latency in milliseconds",
   labelNames: ["service"] as const,
 });
 
 const dependencyUp = new Gauge({
-  name: "arqh_dependency_up",
+  name: "dispatch_dependency_up",
   help: "Latest dependency health-check result (1=up, 0=down)",
   labelNames: ["service"] as const,
 });

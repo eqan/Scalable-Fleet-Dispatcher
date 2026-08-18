@@ -16,7 +16,7 @@ interface SplitLayoutProps {
   right: ReactNode;
 }
 
-const STORAGE_KEY = "arqh:split-ratio";
+const STORAGE_KEY = "dispatch:split-ratio";
 const DEFAULT_RATIO = 55; // percent for left pane
 const MIN_RATIO = 20;
 const MAX_RATIO = 80;

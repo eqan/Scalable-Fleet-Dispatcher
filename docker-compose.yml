@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
 
   redis:
-    container_name: arqh_redis
+    container_name: dispatch_redis
     image: redis:7-alpine
     # Internal-only: reachable by other services as `redis:6379` over the
     # compose network. Not published to the host by default to avoid clashing
@@ -67,7 +67,7 @@ services:
       retries: 5
 
   mongo:
-    container_name: arqh_mongo
+    container_name: dispatch_mongo
     image: mongo:7
     # Internal-only: reachable as `mongo:27017` over the compose network.
     # Not published to the host by default (avoids clashing with a local Mongo).

@@ -24,17 +24,17 @@ def kube_config() -> None:
 
 @pytest.fixture(scope="session")
 def namespace() -> str:
-    return os.getenv("K8S_NAMESPACE", "arqh")
+    return os.getenv("K8S_NAMESPACE", "dispatch")
 
 
 @pytest.fixture(scope="session")
 def release_name() -> str:
-    return os.getenv("RELEASE_NAME", "arqh")
+    return os.getenv("RELEASE_NAME", "dispatch")
 
 
 @pytest.fixture(scope="session")
 def ingress_host() -> str:
-    return os.getenv("INGRESS_HOST", "arqh.localtest.me")
+    return os.getenv("INGRESS_HOST", "dispatch.localtest.me")
 
 
 @pytest.fixture(scope="session")
@@ -44,7 +44,7 @@ def monitoring_namespace() -> str:
 
 @pytest.fixture(scope="session")
 def grafana_host() -> str:
-    return os.getenv("GRAFANA_HOST", "grafana.arqh.localtest.me")
+    return os.getenv("GRAFANA_HOST", "grafana.dispatch.localtest.me")
 
 
 @pytest.fixture(scope="session")

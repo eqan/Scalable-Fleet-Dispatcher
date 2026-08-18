@@ -103,7 +103,7 @@ def test_api_service_monitor_exists(
         version="v1",
         namespace=monitoring_namespace,
         plural="servicemonitors",
-        name="arqh-api",
+        name="dispatch-api",
     )
     endpoint = service_monitor["spec"]["endpoints"][0]
     assert endpoint["path"] == "/metrics"
@@ -120,7 +120,7 @@ def test_grafana_ingress_serves_login_page(http: requests.Session, grafana_host:
     assert "grafana" in response.text.lower()
 
 
-def test_prometheus_scrapes_arqh_api(monitoring_namespace: str) -> None:
+def test_prometheus_scrapes_dispatch_api(monitoring_namespace: str) -> None:
     # Allow one scrape interval after the API Service appears.
     with _port_forward(monitoring_namespace, "monitoring-kube-prometheus-prometheus", 9090) as port:
         deadline = time.time() + 90
@@ -128,7 +128,7 @@ def test_prometheus_scrapes_arqh_api(monitoring_namespace: str) -> None:
         while time.time() < deadline:
             response = requests.get(
                 f"http://127.0.0.1:{port}/api/v1/query",
-                params={"query": 'up{job="arqh-api"}'},
+                params={"query": 'up{job="dispatch-api"}'},
                 timeout=10,
             )
             response.raise_for_status()
@@ -141,7 +141,7 @@ def test_prometheus_scrapes_arqh_api(monitoring_namespace: str) -> None:
             time.sleep(2)
 
         raise AssertionError(
-            f"expected Prometheus arqh-api scrape target UP within 90s; last={last_payload}"
+            f"expected Prometheus dispatch-api scrape target UP within 90s; last={last_payload}"
         )
 
 

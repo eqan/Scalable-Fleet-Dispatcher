@@ -1,6 +1,6 @@
 #  Mission Control Backend
 
-> Redis-first write-behind cache architecture with event-driven workers, Lua-scripted atomic mutations, and SSE real-time updates for the Arqh logistics dispatch system.
+> Redis-first write-behind cache architecture with event-driven workers, Lua-scripted atomic mutations, and SSE real-time updates for the Dispatch logistics dispatch system.
 
 ---
 

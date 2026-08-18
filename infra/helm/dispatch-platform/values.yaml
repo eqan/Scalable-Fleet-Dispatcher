@@ -6,9 +6,9 @@ imagePullPolicy: IfNotPresent
 ingress:
   enabled: true
   className: nginx
-  host: arqh.localtest.me
+  host: dispatch.localtest.me
   tls:
-    secretName: arqh-local-tls
+    secretName: dispatch-local-tls
   # SSE: no buffering + long timeouts. Header rewrites live in ingress.yaml.
   annotations:
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
@@ -18,7 +18,7 @@ ingress:
 api:
   replicaCount: 2
   image:
-    repository: arqh-api
+    repository: dispatch-api
     tag: local
   containerPort: 4000
   service:
@@ -29,7 +29,7 @@ api:
     PORT: "4000"
     ENV: development
     REDIS_DB: "0"
-    MONGO_DATABASE: arqh
+    MONGO_DATABASE: dispatch
     RATE_LIMIT_WINDOW_MS: "60000"
     RATE_LIMIT_GENERAL_MAX: "100"
     RATE_LIMIT_MUTATION_MAX: "50"
@@ -67,7 +67,7 @@ api:
 worker:
   replicaCount: 1
   image:
-    repository: arqh-worker
+    repository: dispatch-worker
     tag: local
   resources:
     requests:
@@ -86,7 +86,7 @@ worker:
 web:
   replicaCount: 1
   image:
-    repository: arqh-web
+    repository: dispatch-web
     tag: local
   containerPort: 8080
   service:
