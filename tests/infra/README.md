@@ -10,10 +10,10 @@ These tests verify the Kubernetes integration for Pillar A and Pillar C:
 
 ```bash
 python3 -m pip install -r tests/infra/requirements.txt
-INGRESS_HOST=arqh.localtest.me KUBECONFIG=~/.kube/config pytest tests/infra -v
+INGRESS_HOST=dispatch.localtest.me KUBECONFIG=~/.kube/config pytest tests/infra -v
 ```
 
 Optional overrides:
 
-- `K8S_NAMESPACE` defaults to `arqh`
-- `RELEASE_NAME` defaults to `arqh`
+- `K8S_NAMESPACE` defaults to `dispatch`
+- `RELEASE_NAME` defaults to `dispatch`

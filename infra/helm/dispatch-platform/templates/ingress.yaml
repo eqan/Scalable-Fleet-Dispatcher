@@ -4,9 +4,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "arqh.componentName" (dict "root" . "name" "ingress-headers") }}
+  name: {{ include "dispatch.componentName" (dict "root" . "name" "ingress-headers") }}
   labels:
-    {{- include "arqh.commonLabels" (dict "root" . "name" "ingress-headers" "component" "proxy") | nindent 4 }}
+    {{- include "dispatch.commonLabels" (dict "root" . "name" "ingress-headers" "component" "proxy") | nindent 4 }}
 data:
   X-Forwarded-Proto: "https"
   X-Forwarded-Port: "443"
@@ -14,12 +14,12 @@ data:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "arqh.componentName" (dict "root" . "name" "ingress") }}
+  name: {{ include "dispatch.componentName" (dict "root" . "name" "ingress") }}
   labels:
-    {{- include "arqh.commonLabels" (dict "root" . "name" "ingress" "component" "proxy") | nindent 4 }}
+    {{- include "dispatch.commonLabels" (dict "root" . "name" "ingress" "component" "proxy") | nindent 4 }}
   annotations:
     {{- toYaml .Values.ingress.annotations | nindent 4 }}
-    nginx.ingress.kubernetes.io/proxy-set-headers: {{ printf "%s/%s" .Release.Namespace (include "arqh.componentName" (dict "root" . "name" "ingress-headers")) | quote }}
+    nginx.ingress.kubernetes.io/proxy-set-headers: {{ printf "%s/%s" .Release.Namespace (include "dispatch.componentName" (dict "root" . "name" "ingress-headers")) | quote }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   tls:
@@ -34,14 +34,14 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "arqh.componentName" (dict "root" . "name" "api") }}
+                name: {{ include "dispatch.componentName" (dict "root" . "name" "api") }}
                 port:
                   number: {{ .Values.api.service.port }}
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: {{ include "arqh.componentName" (dict "root" . "name" "web") }}
+                name: {{ include "dispatch.componentName" (dict "root" . "name" "web") }}
                 port:
                   number: {{ .Values.web.service.port }}
 {{- end }}

@@ -6,23 +6,23 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "arqh.componentName" (dict "root" $ "name" $name) }}
+  name: {{ include "dispatch.componentName" (dict "root" $ "name" $name) }}
   labels:
-    {{- include "arqh.commonLabels" (dict "root" $ "name" $name "component" "datastore") | nindent 4 }}
+    {{- include "dispatch.commonLabels" (dict "root" $ "name" $name "component" "datastore") | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "arqh.selectorLabels" (dict "root" $ "name" $name) | nindent 6 }}
+      {{- include "dispatch.selectorLabels" (dict "root" $ "name" $name) | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:
     - from:
         - podSelector:
             matchLabels:
-              {{- include "arqh.selectorLabels" (dict "root" $ "name" "api") | nindent 14 }}
+              {{- include "dispatch.selectorLabels" (dict "root" $ "name" "api") | nindent 14 }}
         - podSelector:
             matchLabels:
-              {{- include "arqh.selectorLabels" (dict "root" $ "name" "worker") | nindent 14 }}
+              {{- include "dispatch.selectorLabels" (dict "root" $ "name" "worker") | nindent 14 }}
       ports:
         - protocol: TCP
           port: {{ index $.Values $name "service" "port" }}
@@ -31,13 +31,13 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "arqh.componentName" (dict "root" . "name" "api") }}
+  name: {{ include "dispatch.componentName" (dict "root" . "name" "api") }}
   labels:
-    {{- include "arqh.commonLabels" (dict "root" . "name" "api" "component" "backend") | nindent 4 }}
+    {{- include "dispatch.commonLabels" (dict "root" . "name" "api" "component" "backend") | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "arqh.selectorLabels" (dict "root" . "name" "api") | nindent 6 }}
+      {{- include "dispatch.selectorLabels" (dict "root" . "name" "api") | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:
@@ -55,13 +55,13 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "arqh.componentName" (dict "root" . "name" "web") }}
+  name: {{ include "dispatch.componentName" (dict "root" . "name" "web") }}
   labels:
-    {{- include "arqh.commonLabels" (dict "root" . "name" "web" "component" "proxy") | nindent 4 }}
+    {{- include "dispatch.commonLabels" (dict "root" . "name" "web" "component" "proxy") | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "arqh.selectorLabels" (dict "root" . "name" "web") | nindent 6 }}
+      {{- include "dispatch.selectorLabels" (dict "root" . "name" "web") | nindent 6 }}
   policyTypes:
     - Ingress
   ingress:

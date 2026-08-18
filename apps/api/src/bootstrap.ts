@@ -40,7 +40,7 @@ const loadSeedData = (): SeedData => {
 /* ------------------------------------------------------------------ */
 
 const main = async () => {
-  logger.info({ env: env.ENV }, "Starting Arqh Backend...");
+  logger.info({ env: env.ENV }, "Starting Dispatch Backend...");
 
   // ---- 1. Connect to external services ----
   const redis = getRedisClient();

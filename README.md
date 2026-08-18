@@ -1,4 +1,4 @@
-# Arqh Mission Control -- Logistics Dispatch Platform
+# Dispatch Mission Control -- Logistics Dispatch Platform
 
 > A senior-grade, full-stack logistics dispatch prototype built as a **Bun monorepo** with end-to-end type safety, Redis-first state management, event-driven optimization, and real-time SSE updates.
 
@@ -34,7 +34,7 @@
 ├── infra/
 │   ├── kind/                Multi-node kind cluster config
 │   └── helm/
-│       ├── arqh-platform/   App chart (api/worker/web/redis/mongo/ingress/HPA)
+│       ├── dispatch-platform/   App chart (api/worker/web/redis/mongo/ingress/HPA)
 │       └── monitoring/      Observability chart (kube-prometheus-stack + Loki + Promtail)
 ├── tests/infra/             pytest cluster-state + Ingress smoke + monitoring tests
 ├── .github/workflows/       CI quality gates + GHCR image publish
@@ -47,15 +47,15 @@
 
 ### Why a Monorepo?
 
-The task specification explicitly requires **shared type definitions** between frontend and backend. A monorepo with a `packages/shared` workspace is the only clean way to achieve this without code duplication:
+This platform depends on **shared type definitions** between frontend and backend. A monorepo with a `packages/shared` workspace is the cleanest way to achieve that without code duplication:
 
 - **`@repo/shared`** exports Zod schemas that are the _single source of truth_ for all domain types (`Vehicle`, `Order`, `Solution`, `Assignment`) and API contracts.
 - If a schema changes, both `apps/api` and `apps/web` see the update immediately -- or fail to compile. This is real end-to-end type safety.
 - No copy-paste of `types.ts` between repos. No codegen. No drift.
 
-## Running on Kubernetes (Pillar A — submission target)
+## Running on Kubernetes
 
-The submission target is a local **multi-node Kubernetes** topology, packaged as a single Helm
+The primary runtime topology is a local **multi-node Kubernetes** cluster, packaged as a single Helm
 chart and fronted by an Ingress. `make bootstrap` (alias for `./run-platform.sh up`) brings the
 whole platform up green with one command. The Docker Compose stack in [Quick Start](#quick-start)
 is retained only as a no-Kubernetes fallback (`make compose-up`).
@@ -85,44 +85,44 @@ This runs the stages in [`run-platform.sh`](run-platform.sh):
 2. **deps** — installs `metrics-server` (patched `--kubelet-insecure-tls`), `ingress-nginx`, the
    monitoring stack (`kube-prometheus-stack` + Loki + Promtail), and self-signed TLS secrets for the
    app + Grafana hosts.
-3. **deploy** — builds `arqh-api|worker|web:local`, `kind load`s them, and `helm upgrade --install arqh infra/helm/arqh-platform -n arqh`.
+3. **deploy** — builds `dispatch-api|worker|web:local`, `kind load`s them, and `helm upgrade --install dispatch infra/helm/dispatch-platform -n dispatch`.
 4. **smoke** — waits for Ingress health, then runs `pytest tests/infra` from an isolated venv.
 
 **Green** means: all pods Ready, `kubectl get hpa` shows real (non-`<unknown>`) metrics, and
-`curl -k https://arqh.localtest.me/api/health` returns `200` with Redis + Mongo `connected`.
-Grafana is at `https://grafana.arqh.localtest.me` (admin creds under `.tmp/k8s/grafana-admin.env`).
+`curl -k https://dispatch.localtest.me/api/health` returns `200` with Redis + Mongo `connected`.
+Grafana is at `https://grafana.dispatch.localtest.me` (admin creds under `.tmp/k8s/grafana-admin.env`).
 
 ### Traffic flow
 
 ```
-Browser ──HTTPS──▶ ingress-nginx ─┬─ /api/*  ─▶ arqh-api  (ClusterIP :4000) ─▶ Redis + Mongo
-                                  └─ /        ─▶ arqh-web  (ClusterIP :8080, nginx-unprivileged + SPA)
+Browser ──HTTPS──▶ ingress-nginx ─┬─ /api/*  ─▶ dispatch-api  (ClusterIP :4000) ─▶ Redis + Mongo
+                                  └─ /        ─▶ dispatch-web  (ClusterIP :8080, nginx-unprivileged + SPA)
 /metrics is served on the API root only and is NOT routed by the Ingress (stays internal).
 ```
 
 ### Operations
 
-- **Scaling (HPA):** `kubectl get hpa -n arqh` — API scales on CPU 70% / memory 80% (min 2, max 5).
+- **Scaling (HPA):** `kubectl get hpa -n dispatch` — API scales on CPU 70% / memory 80% (min 2, max 5).
 - **Resilience:** API PDB (`minAvailable: 1`) + soft anti-affinity; NetworkPolicies lock Redis/Mongo to api/worker.
-- **Rolling update:** rebuild + `kind load`, then `helm upgrade arqh infra/helm/arqh-platform -n arqh`.
-- **Inspect probes:** `kubectl describe deploy arqh-api -n arqh` — readiness `/api/health` (dependency-aware),
+- **Rolling update:** rebuild + `kind load`, then `helm upgrade dispatch infra/helm/dispatch-platform -n dispatch`.
+- **Inspect probes:** `kubectl describe deploy dispatch-api -n dispatch` — readiness `/api/health` (dependency-aware),
   liveness/startup `/api/live` (dependency-free, so a Redis blip never triggers a restart loop).
 - **Status / logs:** `make ps` · `make logs ARGS=api` (also `grafana`, `prometheus`, `loki`).
 
 ### Telemetry coordinates
 
-| Item               | Value                                                                                                        |
-| ------------------ | ------------------------------------------------------------------------------------------------------------ |
-| App UI (K8s)       | `https://arqh.localtest.me` — **not** `localhost:5173`                                                       |
-| Grafana (K8s)      | `https://grafana.arqh.localtest.me` — **not** `localhost:3001`                                               |
-| Admin creds        | `.tmp/k8s/grafana-admin.env` (`admin-user` / `admin-password`)                                               |
-| Dashboards         | **Arqh API Overview** · **Arqh Platform Observability** (folder `Arqh`)                                      |
-| Prometheus         | ClusterIP only — ServiceMonitor `arqh-api` scrapes `/metrics`                                                |
-| Useful PromQL      | `up{job="arqh-api"}` · `arqh_dependency_up` · `rate(http_request_duration_ms_count{status_code=~"5.."}[5m])` |
-| Useful LogQL       | `{app="arqh-api"} \| json \| level="error"`                                                                  |
-| Optional localhost | `kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80` → `http://localhost:3000`                |
+| Item               | Value                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| App UI (K8s)       | `https://dispatch.localtest.me` — **not** `localhost:5173`                                                           |
+| Grafana (K8s)      | `https://grafana.dispatch.localtest.me` — **not** `localhost:3001`                                                   |
+| Admin creds        | `.tmp/k8s/grafana-admin.env` (`admin-user` / `admin-password`)                                                       |
+| Dashboards         | **API Overview** · **Platform Observability** (folder `Dispatch`)                                                    |
+| Prometheus         | ClusterIP only — ServiceMonitor `dispatch-api` scrapes `/metrics`                                                    |
+| Useful PromQL      | `up{job="dispatch-api"}` · `dispatch_dependency_up` · `rate(http_request_duration_ms_count{status_code=~"5.."}[5m])` |
+| Useful LogQL       | `{app="dispatch-api"} \| json \| level="error"`                                                                      |
+| Optional localhost | `kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80` → `http://localhost:3000`                        |
 
-> `localhost:5173` / `localhost:3001` only apply after `make compose-up`. The submission path is Kubernetes.
+> `localhost:5173` / `localhost:3001` only apply after `make compose-up`. The Kubernetes path is the primary operating mode.
 
 ### How to check monitoring (operator walkthrough)
 
@@ -138,7 +138,7 @@ Browser ──HTTPS──▶ ingress-nginx ─┬─ /api/*  ─▶ arqh-api  (C
    make ps
    # or
    kubectl get pods -n monitoring
-   kubectl get pods -n arqh
+   kubectl get pods -n dispatch
    ```
 
 3. **Read Grafana admin credentials** (generated once, reused on later boots):
@@ -150,41 +150,41 @@ Browser ──HTTPS──▶ ingress-nginx ─┬─ /api/*  ─▶ arqh-api  (C
    ```
 
 4. **Open Grafana in the browser**:
-   - URL: [https://grafana.arqh.localtest.me](https://grafana.arqh.localtest.me)
+   - URL: [https://grafana.dispatch.localtest.me](https://grafana.dispatch.localtest.me)
    - Accept the self-signed certificate warning
    - Sign in with the values from `.tmp/k8s/grafana-admin.env`
 
-5. **Open the provisioned dashboards** (Dashboards → Browse → folder **Arqh**):
+5. **Open the provisioned dashboards** (Dashboards → Browse → folder **Dispatch**):
 
-   | Dashboard                       | What to verify                                                                                                                 |
-   | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-   | **Arqh API Overview**           | Request heatmap, request count by route, 4xx/5xx rates, process CPU/mem, API logs                                              |
-   | **Arqh Platform Observability** | Pod restarts, error-log spikes, API 5xx by route, capacity vs requests/limits, Redis/Mongo dependency latency, request heatmap |
+   | Dashboard                  | What to verify                                                                                                                 |
+   | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+   | **API Overview**           | Request heatmap, request count by route, 4xx/5xx rates, process CPU/mem, API logs                                              |
+   | **Platform Observability** | Pod restarts, error-log spikes, API 5xx by route, capacity vs requests/limits, Redis/Mongo dependency latency, request heatmap |
 
-   Live capture from this cluster (**Arqh API Overview** — heatmap, route rates, error rates, CPU/mem):
+   Live capture from this cluster (**API Overview** — heatmap, route rates, error rates, CPU/mem):
 
-   ![Arqh API Overview Grafana dashboard](packages/monitoring/grafana/screenshots/grafana-dashboard.png)
+   ![API Overview Grafana dashboard](packages/monitoring/grafana/screenshots/grafana-dashboard.png)
 
 6. **Generate a little traffic** so panels are not empty:
 
    ```bash
-   curl -sk https://arqh.localtest.me/api/health
-   curl -sk https://arqh.localtest.me/api/state
+   curl -sk https://dispatch.localtest.me/api/health
+   curl -sk https://dispatch.localtest.me/api/state
    # optional: open the app UI and click around
-   open https://arqh.localtest.me
+   open https://dispatch.localtest.me
    ```
 
    Wait ~15–30s (Prometheus scrape interval), then refresh the dashboard (time range: **Last 15 minutes**).
 
 7. **Quick signals that mean "healthy"**:
-   - Explore → Prometheus → query `up{job="arqh-api"}` → value `1`
-   - Explore → Prometheus → `arqh_dependency_up` → `redis` and `mongo` are `1`
-   - Explore → Loki → `{app="arqh-api"} | json` → recent log lines appear
+   - Explore → Prometheus → query `up{job="dispatch-api"}` → value `1`
+   - Explore → Prometheus → `dispatch_dependency_up` → `redis` and `mongo` are `1`
+   - Explore → Loki → `{app="dispatch-api"} | json` → recent log lines appear
    - Platform Observability → **Dependency Latency** shows Redis/Mongo lines after health probes
 
 8. **If something is blank**:
    - No metrics: `kubectl get servicemonitor -n monitoring` and `make smoke` (includes scrape checks)
-   - No logs: wait for Promtail, then confirm labels with `{app="arqh-api"}`
+   - No logs: wait for Promtail, then confirm labels with `{app="dispatch-api"}`
    - Cannot reach Grafana: `kubectl get ingress -n monitoring` and `make logs ARGS=grafana`
    - Wrong password: re-read `.tmp/k8s/grafana-admin.env` (do not recreate casually — it is the source of truth for the Secret)
 
@@ -193,7 +193,7 @@ Browser ──HTTPS──▶ ingress-nginx ─┬─ /api/*  ─▶ arqh-api  (C
 ```bash
 make smoke            # wait for Ingress health, then pytest tests/infra -v (venv auto-managed)
 # or directly:
-INGRESS_HOST=arqh.localtest.me GRAFANA_HOST=grafana.arqh.localtest.me \
+INGRESS_HOST=dispatch.localtest.me GRAFANA_HOST=grafana.dispatch.localtest.me \
 KUBECONFIG=~/.kube/config \
   .tmp/infra-venv/bin/python -m pytest tests/infra -v
 ```
@@ -201,7 +201,7 @@ KUBECONFIG=~/.kube/config \
 - `tests/infra/test_cluster_state.py` — Ready workloads, probes, resources, secrets, HPA, PDB, NetworkPolicies, Ingress.
 - `tests/infra/test_smoke_e2e.py` — health, hydration, assign round-trip, optimize pipeline, SSE, `/metrics` non-exposure.
 - `tests/infra/test_zz_probe_resilience.py` — deleting a Redis pod degrades readiness (not liveness) and recovers (runs last).
-- `tests/infra/test_monitoring.py` — monitoring workloads Ready, ServiceMonitor, Grafana ingress, Prometheus scrapes `arqh-api`.
+- `tests/infra/test_monitoring.py` — monitoring workloads Ready, ServiceMonitor, Grafana ingress, Prometheus scrapes `dispatch-api`.
 
 ### Teardown
 
@@ -321,11 +321,11 @@ Runtime view after `make bootstrap` (cluster create / Helm / smoke are in [Boots
 flowchart TB
   Browser["Browser"]
 
-  subgraph Kind["kind cluster: arqh"]
+  subgraph Kind["kind cluster: dispatch"]
     ING["ingress-nginx :80/:443"]
     MS["metrics-server"]
 
-    subgraph NS_ARQH["namespace: arqh"]
+    subgraph NS_ARQH["namespace: dispatch"]
       WEB["web :8080"]
       API["api x2 :4000"]
       WRK["worker x1"]
@@ -342,8 +342,8 @@ flowchart TB
     end
   end
 
-  Browser -->|HTTPS arqh.localtest.me| ING
-  Browser -->|HTTPS grafana.arqh.localtest.me| GRAF
+  Browser -->|HTTPS dispatch.localtest.me| ING
+  Browser -->|HTTPS grafana.dispatch.localtest.me| GRAF
 
   ING -->|path /| WEB
   ING -->|path /api| API
@@ -368,8 +368,8 @@ HTTPS is decrypted at Ingress; pods get plain HTTP in-cluster. `/metrics` is scr
 flowchart LR
   C["Browser"] -->|"1. HTTPS encrypted"| ING["Ingress<br/>TLS termination<br/>decrypt + route"]
 
-  ING -->|"2a. path /api<br/>HTTP in-cluster"| API["Service arqh-api<br/>to pods :4000"]
-  ING -->|"2b. path /<br/>HTTP in-cluster"| WEB["Service arqh-web<br/>to pods :8080"]
+  ING -->|"2a. path /api<br/>HTTP in-cluster"| API["Service dispatch-api<br/>to pods :4000"]
+  ING -->|"2b. path /<br/>HTTP in-cluster"| WEB["Service dispatch-web<br/>to pods :8080"]
 
   API --> H["/api/health and /api/live"]
   API --> E["/api/events SSE"]
@@ -383,7 +383,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  HPA_A["HPA arqh-api<br/>min 2 max 5<br/>CPU + memory"] -->|scale| API["Deployment api"]
+  HPA_A["HPA dispatch-api<br/>min 2 max 5<br/>CPU + memory"] -->|scale| API["Deployment api"]
   HPA_W["HPA worker<br/>disabled by default"] -.-> WRK["Deployment worker"]
 
   WEB["Deployment web x1"]
@@ -438,7 +438,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  API["arqh-api :4000"] -->|"/metrics"| SM["ServiceMonitor"]
+  API["dispatch-api :4000"] -->|"/metrics"| SM["ServiceMonitor"]
   SM --> PROM["Prometheus"]
   PODS["All pods"] --> PT["Promtail"]
   PT --> LOKI["Loki"]
@@ -462,7 +462,7 @@ flowchart TD
   D --> E["deploy"]
   E --> E1["docker build x3"]
   E --> E2["kind load"]
-  E --> E3["helm upgrade arqh"]
+  E --> E3["helm upgrade dispatch"]
   E --> F["smoke<br/>pytest tests/infra"]
   F --> G["green"]
 ```
@@ -472,19 +472,19 @@ flowchart TD
 ```mermaid
 flowchart TB
   BOOT["run-platform.sh"] --> DEP["helm upgrade --install monitoring<br/>infra/helm/monitoring<br/>-n monitoring"]
-  BOOT --> APP["helm upgrade --install arqh<br/>infra/helm/arqh-platform<br/>-n arqh"]
+  BOOT --> APP["helm upgrade --install dispatch<br/>infra/helm/dispatch-platform<br/>-n dispatch"]
 
   DEP --> M["Release: monitoring<br/>Prometheus, Grafana, Loki, Promtail, ServiceMonitor"]
-  APP --> A["Release: arqh<br/>api, worker, web, redis, mongo, Ingress"]
+  APP --> A["Release: dispatch<br/>api, worker, web, redis, mongo, Ingress"]
 ```
 
 ```mermaid
 flowchart LR
   V["values.yaml<br/>ingress.host"] --> H["helm template / upgrade"]
-  R["Release.Name=arqh"] --> H
+  R["Release.Name=dispatch"] --> H
   T["templates/ingress.yaml<br/>Values placeholders"] --> H
   P["_helpers.tpl<br/>componentName"] --> H
-  H --> Y["Rendered YAML<br/>name: arqh-ingress<br/>host: arqh.localtest.me"]
+  H --> Y["Rendered YAML<br/>name: dispatch-ingress<br/>host: dispatch.localtest.me"]
   Y --> K["kubectl / Helm to API server"]
   K --> O["Ingress object live in cluster"]
 ```
@@ -500,7 +500,7 @@ flowchart LR
   CI --> V["helm lint + template<br/>+ kubeconform"]
 
   MAIN["push main"] --> B["build.yml"]
-  B --> P["build + push to GHCR<br/>ghcr.io owner arqh-api worker web<br/>tag = git SHA"]
+  B --> P["build + push to GHCR<br/>ghcr.io owner dispatch-api worker web<br/>tag = git SHA"]
 ```
 
 ### Infra tests & config
@@ -557,17 +557,17 @@ replay stream XADD, so a client connected to pod A still sees mutations handled 
 
 ## Observability & Monitoring
 
-### Kubernetes (submission path)
+### Kubernetes
 
 The bootstrap installs a separate Helm release from [`infra/helm/monitoring`](infra/helm/monitoring):
 
-| Component                        | Role                                                                 |
-| -------------------------------- | -------------------------------------------------------------------- |
-| Prometheus Operator + Prometheus | Scrapes the API via ServiceMonitor on ClusterIP `/metrics`           |
-| Grafana                          | `https://grafana.arqh.localtest.me` (sidecar datasources/dashboards) |
-| Loki + Promtail                  | Pod logs; LogQL `{app="arqh-api"}`                                   |
+| Component                        | Role                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------ |
+| Prometheus Operator + Prometheus | Scrapes the API via ServiceMonitor on ClusterIP `/metrics`               |
+| Grafana                          | `https://grafana.dispatch.localtest.me` (sidecar datasources/dashboards) |
+| Loki + Promtail                  | Pod logs; LogQL `{app="dispatch-api"}`                                   |
 
-`/api/health` records `arqh_dependency_latency_ms` / `arqh_dependency_up` so dependency panels stay fresh. Chart dependencies are fetched with `helm dependency build` at bootstrap (`Chart.lock` committed; `charts/*.tgz` gitignored).
+`/api/health` records `dispatch_dependency_latency_ms` / `dispatch_dependency_up` so dependency panels stay fresh. Chart dependencies are fetched with `helm dependency build` at bootstrap (`Chart.lock` committed; `charts/*.tgz` gitignored).
 
 Operator walkthrough (creds, dashboards, smoke signals): see [How to check monitoring](#how-to-check-monitoring-operator-walkthrough) above.
 
@@ -581,17 +581,17 @@ Operator walkthrough (creds, dashboards, smoke signals): see [How to check monit
 
 ### Pre-provisioned Grafana Dashboards
 
-| Dashboard                       | Panels                                                                                         |
-| ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **Arqh API Overview**           | Request heatmap, count by route, 4xx/5xx rates, CPU/mem, API logs                              |
-| **Arqh Platform Observability** | Pod restarts, error-log spikes, 5xx by route, capacity vs limits, Redis/Mongo latency, heatmap |
+| Dashboard                  | Panels                                                                                         |
+| -------------------------- | ---------------------------------------------------------------------------------------------- |
+| **API Overview**           | Request heatmap, count by route, 4xx/5xx rates, CPU/mem, API logs                              |
+| **Platform Observability** | Pod restarts, error-log spikes, 5xx by route, capacity vs limits, Redis/Mongo latency, heatmap |
 
-Screenshot: [How to check monitoring](#how-to-check-monitoring-operator-walkthrough) (live **Arqh API Overview** capture).
+Screenshot: [How to check monitoring](#how-to-check-monitoring-operator-walkthrough) (live **API Overview** capture).
 
 ### Log Aggregation (Loki + Promtail)
 
 - **Compose:** `{service="api"} \| json`
-- **Kubernetes:** `{app="arqh-api"} \| json` (Promtail relabels `app.kubernetes.io/*`)
+- **Kubernetes:** `{app="dispatch-api"} \| json` (Promtail relabels `app.kubernetes.io/*`)
 
 ---
 
@@ -636,12 +636,12 @@ GitHub Actions now covers both **quality gates** and **image packaging**:
 
 - **`kind-smoke.yml`** runs on pull requests and pushes to `main`:
   - `./run-platform.sh up` with `IMAGE_TAG=sha-<git-sha>` and `SKIP_MONITORING=1`
-  - Pillar C pytest through the Ingress (monitoring suite skipped with the stack)
+  - ingress-based pytest smoke coverage (monitoring suite skipped with the stack)
 
 - **`build.yml`** runs on pushes to `main` and `workflow_dispatch`:
   - builds `api`, `worker`, and `web` with Docker Buildx
   - reuses GitHub Actions cache layers
-  - pushes SHA-tagged images to GHCR as `ghcr.io/<owner>/arqh-<component>:sha-<git-sha>`
+  - pushes SHA-tagged images to GHCR as `ghcr.io/<owner>/dispatch-<component>:sha-<git-sha>`
   - also publishes `:latest` on the default branch as a convenience tag only
 
 The Docker integration tests (`tests/integration-docker.ts`) are excluded from CI -- they target a running Docker stack and are run manually via `bun run test:docker`.
@@ -650,12 +650,12 @@ The Docker integration tests (`tests/integration-docker.ts`) are excluded from C
 
 ## Tech Stack
 
-Platform / infrastructure scope only (app baseline — Express, React, Zod, etc. — was given frozen):
+Platform / infrastructure scope only (the application layer is treated as a stable baseline: Express, React, Zod, and related app code):
 
 | Layer            | Technology                                                              |
 | ---------------- | ----------------------------------------------------------------------- |
 | Local cluster    | kind (1 control-plane + 2 workers)                                      |
-| Packaging        | Helm (`arqh-platform` + `monitoring` charts)                            |
+| Packaging        | Helm (`dispatch-platform` + `monitoring` charts)                        |
 | Ingress / TLS    | ingress-nginx, path split, `proxy-set-headers`, self-signed secrets     |
 | Workloads        | Deployments + StatefulSets (Redis/Mongo), HPA, PDB, NetworkPolicy       |
 | Containers       | Docker multi-stage builds, `nginx-unprivileged`, non-root, no `:latest` |
@@ -663,18 +663,17 @@ Platform / infrastructure scope only (app baseline — Express, React, Zod, etc.
 | CI/CD            | GitHub Actions (`ci`, `kind-smoke`, `build`) → GHCR SHA tags            |
 | Infra tests      | pytest + Kubernetes Python client (Ingress HTTPS, no port-forward)      |
 | Observability    | kube-prometheus-stack, Grafana, Loki, Promtail, ServiceMonitor          |
-| Compose fallback | Docker Compose (`compose-*`) — not the submission path                  |
+| Compose fallback | Docker Compose (`compose-*`) — not the primary deployment path          |
 
 ## License
 
-Private -- Arqh
+Private internal project
 
 ---
 
-## Architecture Comparison Matrix (Pillar A + B + C + D)
+## Architecture Comparison Matrix
 
-Challenge-required section: for each non-obvious choice — **why**, **vs a direct alternative**,
-**trade-offs / limitations**, and a **short next step**.
+This section captures each non-obvious platform choice, the main alternative, the trade-offs, and the next step.
 
 | Decision                | Chosen                                    | Alternative                        | Why chosen / trade-off                                                                  | Next step                                          |
 | ----------------------- | ----------------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------- |
@@ -700,7 +699,7 @@ Challenge-required section: for each non-obvious choice — **why**, **vs a dire
 | CI image tags           | **`values-ci.yaml` + `sha-<git-sha>`**    | `:latest` in CI overlay            | kind-smoke / helm lint stay on immutable tags; `sha-ci` is lint-only placeholder        | Pull GHCR SHAs on `main` after `build.yml`         |
 | CI/CD engine            | **GitHub Actions** (`ci`/`build`/`smoke`) | CircleCI / one monolithic pipeline | Native status checks; kind-smoke closes the deploy loop on every PR                     | Required status checks on the private fork         |
 | kind-smoke scope        | **`SKIP_MONITORING=1` in CI**             | Full monitoring in every PR        | Fits GitHub-hosted runners; full Grafana/Prom/Loki stays on `make bootstrap`            | Optional obs smoke on a larger runner              |
-| Format gate             | **Prettier `format:check` in CI**         | Auto-format inside CI              | Matches challenge formatting gate; local pre-commit writes, CI only verifies            | Keep hooks via `make install-hooks` on clones      |
+| Format gate             | **Prettier `format:check` in CI**         | Auto-format inside CI              | Keeps formatting deterministic; local pre-commit writes, CI only verifies               | Keep hooks via `make install-hooks` on clones      |
 | Dockerfile lint         | **hadolint**                              | Dockle                             | Strong best-practice feedback with easy CI integration                                  | Image CVE scan (Trivy/Grype)                       |
 | Manifest schema         | **helm lint + kubeconform**               | kube-linter / conftest             | Lightweight chart+schema validation (app + monitoring)                                  | Policy-as-code (OPA/Conftest)                      |
 | Registry delivery       | **GHCR + SHA tags**                       | Docker Hub / kind-load only        | Immutable deploy tags; fork package visibility needs care                               | Wire `main` smoke to GHCR pulls                    |
@@ -709,4 +708,4 @@ Challenge-required section: for each non-obvious choice — **why**, **vs a dire
 | Metrics exposure        | **ServiceMonitor (ClusterIP)**            | Ingress `/metrics`                 | Keeps scrape private; fits Prometheus Operator                                          | NetworkPolicy for scrape path only                 |
 | Grafana access          | **Dedicated ingress host + TLS**          | port-forward only                  | Demo/screenshot UX; creds under `.tmp/k8s/grafana-admin.env`                            | SSO / cert-manager                                 |
 | Grafana datasources     | **Split compose vs K8s files**            | One shared YAML folder             | Prevents Compose crash on duplicate `isDefault` Prometheus                              | Unified templated datasource chart                 |
-| Compose baseline        | **Kept as `compose-*` fallback**          | Delete compose entirely            | Useful no-K8s path; submission default remains `make bootstrap`                         | Drop compose once K8s-only is mandated             |
+| Compose baseline        | **Kept as `compose-*` fallback**          | Delete compose entirely            | Useful no-K8s path while `make bootstrap` remains the default                           | Drop compose once K8s-only is mandated             |

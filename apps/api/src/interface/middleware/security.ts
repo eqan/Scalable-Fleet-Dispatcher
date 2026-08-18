@@ -24,7 +24,7 @@ export const securityHeaders = helmet();
 /**
  * CORS middleware.
  * Supports a single wildcard "*" or a comma-separated allowlist
- * (e.g. "https://app.arqh.com,http://localhost:5173").
+ * (e.g. "https://app.dispatch.com,http://localhost:5173").
  */
 export const corsMiddleware = cors({
   origin: env.CORS_ORIGIN === "*" ? "*" : env.CORS_ORIGIN.split(","),

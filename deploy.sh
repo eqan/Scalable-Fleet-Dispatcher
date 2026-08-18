@@ -6,9 +6,9 @@
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRONTEND_DIST="$APP_DIR/apps/web/dist"
-NGINX_SERVE_DIR="/var/www/arqhfront/build"
+NGINX_SERVE_DIR="/var/www/dispatchfront/build"
 
-echo "=== ArqhWebApp Production Deploy ==="
+echo "=== Dispatch Web App Production Deploy ==="
 echo "Working directory: $APP_DIR"
 cd "$APP_DIR"
 
@@ -53,8 +53,8 @@ echo ""
 echo "[5/6] Restarting API and Worker..."
 
 # Stop old processes (ignore errors if they don't exist yet)
-pm2 delete arqh-api 2>/dev/null || true
-pm2 delete arqh-worker 2>/dev/null || true
+pm2 delete dispatch-api 2>/dev/null || true
+pm2 delete dispatch-worker 2>/dev/null || true
 
 # Start both processes from ecosystem config
 # (ecosystem.config.cjs reads .env and passes vars to both processes)
@@ -78,6 +78,6 @@ echo "Services:"
 pm2 list
 echo ""
 echo "URLs:"
-echo "  Frontend:  https://arqhfront.canilgu.org"
-echo "  API:       https://arqhapi.canilgu.org"
+echo "  Frontend:  https://dispatchfront.canilgu.org"
+echo "  API:       https://dispatchapi.canilgu.org"
 echo "  Grafana:   https://grafana.canilgu.org"

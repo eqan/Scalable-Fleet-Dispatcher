@@ -1,16 +1,16 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "arqh.componentName" (dict "root" . "name" "config") }}
+  name: {{ include "dispatch.componentName" (dict "root" . "name" "config") }}
   labels:
-    {{- include "arqh.commonLabels" (dict "root" . "name" "config" "component" "backend") | nindent 4 }}
+    {{- include "dispatch.commonLabels" (dict "root" . "name" "config" "component" "backend") | nindent 4 }}
 data:
   PORT: {{ .Values.api.env.PORT | quote }}
   ENV: {{ .Values.api.env.ENV | quote }}
-  REDIS_HOST: {{ include "arqh.componentName" (dict "root" . "name" "redis") | quote }}
+  REDIS_HOST: {{ include "dispatch.componentName" (dict "root" . "name" "redis") | quote }}
   REDIS_PORT: {{ .Values.redis.service.port | quote }}
   REDIS_DB: {{ .Values.api.env.REDIS_DB | quote }}
-  MONGO_URI: {{ printf "mongodb://%s:%v" (include "arqh.componentName" (dict "root" . "name" "mongo")) .Values.mongo.service.port | quote }}
+  MONGO_URI: {{ printf "mongodb://%s:%v" (include "dispatch.componentName" (dict "root" . "name" "mongo")) .Values.mongo.service.port | quote }}
   MONGO_DATABASE: {{ .Values.api.env.MONGO_DATABASE | quote }}
   CORS_ORIGIN: {{ printf "https://%s" .Values.ingress.host | quote }}
   RATE_LIMIT_WINDOW_MS: {{ .Values.api.env.RATE_LIMIT_WINDOW_MS | quote }}

@@ -1,5 +1,5 @@
 /**
- * E2E test suite for the Arqh Dispatch Dashboard.
+ * E2E test suite for the Dispatch Dashboard.
  *
  * Runs against real API + Vite dev server (no mocks).
  * Covers the happy-path user flows:

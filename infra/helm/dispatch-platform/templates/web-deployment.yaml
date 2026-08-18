@@ -1,18 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "arqh.componentName" (dict "root" . "name" "web") }}
+  name: {{ include "dispatch.componentName" (dict "root" . "name" "web") }}
   labels:
-    {{- include "arqh.commonLabels" (dict "root" . "name" "web" "component" "proxy") | nindent 4 }}
+    {{- include "dispatch.commonLabels" (dict "root" . "name" "web" "component" "proxy") | nindent 4 }}
 spec:
   replicas: {{ .Values.web.replicaCount }}
   selector:
     matchLabels:
-      {{- include "arqh.selectorLabels" (dict "root" . "name" "web") | nindent 6 }}
+      {{- include "dispatch.selectorLabels" (dict "root" . "name" "web") | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "arqh.commonLabels" (dict "root" . "name" "web" "component" "proxy") | nindent 8 }}
+        {{- include "dispatch.commonLabels" (dict "root" . "name" "web" "component" "proxy") | nindent 8 }}
     spec:
       securityContext:
         fsGroup: 101
@@ -25,7 +25,7 @@ spec:
               containerPort: {{ .Values.web.containerPort }}
           env:
             - name: API_HOST
-              value: {{ include "arqh.componentName" (dict "root" . "name" "api") | quote }}
+              value: {{ include "dispatch.componentName" (dict "root" . "name" "api") | quote }}
             - name: API_PORT
               value: {{ .Values.api.service.port | quote }}
           readinessProbe:
@@ -43,4 +43,4 @@ spec:
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
           securityContext:
-            {{- include "arqh.containerSecurity" (dict "uid" 101) | nindent 12 }}
+            {{- include "dispatch.containerSecurity" (dict "uid" 101) | nindent 12 }}

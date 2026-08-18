@@ -4,7 +4,7 @@ import { config } from "dotenv";
 import { defineConfig } from "@playwright/test";
 
 /**
- * Playwright config for the Arqh web frontend.
+ * Playwright config for the Dispatch web frontend.
  *
  * - Loads the monorepo root .env so the API server picks up the right config
  * - Runs Chromium only (fast CI, covers 90%+ of browser bugs)

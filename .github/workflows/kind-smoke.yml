@@ -50,4 +50,4 @@ jobs:
         if: failure()
         run: |
           kubectl get nodes,pods,svc,ingress,hpa -A || true
-          kubectl -n arqh logs -l app.kubernetes.io/name=api --tail=80 || true
+          kubectl -n dispatch logs -l app.kubernetes.io/name=api --tail=80 || true

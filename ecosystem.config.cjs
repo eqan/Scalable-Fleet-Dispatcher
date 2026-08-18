@@ -41,7 +41,7 @@ const envVars = loadEnv(resolve(ROOT, ".env"));
 module.exports = {
   apps: [
     {
-      name: "arqh-api",
+      name: "dispatch-api",
       interpreter: "bun",
       script: "src/bootstrap.ts",
       cwd: resolve(ROOT, "apps/api"),
@@ -52,7 +52,7 @@ module.exports = {
       restart_delay: 3000,
     },
     {
-      name: "arqh-worker",
+      name: "dispatch-worker",
       interpreter: "bun",
       script: "src/worker.ts",
       cwd: resolve(ROOT, "apps/api"),

@@ -1,12 +1,12 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: arqh-api
+  name: dispatch-api
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: api
     app.kubernetes.io/instance: {{ .Values.serviceMonitor.targetRelease }}
-    app.kubernetes.io/part-of: arqh-platform
+    app.kubernetes.io/part-of: dispatch-platform
     app.kubernetes.io/component: backend
     app.kubernetes.io/managed-by: Helm
 spec:

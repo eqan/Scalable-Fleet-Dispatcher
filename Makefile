@@ -1,4 +1,4 @@
-# Arqh Platform — Makefile
+# Dispatch Platform — Makefile
 # Thin wrapper around ./run-platform.sh so `make bootstrap` works cross-platform.
 # (Windows: run under WSL2 or Git Bash, which provide make + bash.)
 

@@ -40,11 +40,6 @@ Thumbs.db
 .idea/
 .vscode/
 
-# -- Custom ---
-docs
-AGENTS.md
-.cursor
-
 # ---- Challenge brief (reference material, not a deliverable) ----
 challenge.txt
 case_challenge_platform.pdf

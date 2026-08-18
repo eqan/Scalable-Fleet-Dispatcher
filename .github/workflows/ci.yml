@@ -126,12 +126,12 @@ jobs:
           sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
 
       - name: Helm lint app chart
-        run: helm lint infra/helm/arqh-platform -f infra/helm/arqh-platform/values-ci.yaml
+        run: helm lint infra/helm/dispatch-platform -f infra/helm/dispatch-platform/values-ci.yaml
 
       - name: Render app chart
         run: |
-          helm template arqh infra/helm/arqh-platform \
-            -f infra/helm/arqh-platform/values-ci.yaml > "${RUNNER_TEMP}/rendered.yaml"
+          helm template dispatch infra/helm/dispatch-platform \
+            -f infra/helm/dispatch-platform/values-ci.yaml > "${RUNNER_TEMP}/rendered.yaml"
 
       - name: Validate rendered manifests
         run: kubeconform -strict -summary "${RUNNER_TEMP}/rendered.yaml"

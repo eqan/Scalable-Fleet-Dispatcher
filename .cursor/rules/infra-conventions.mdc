@@ -1,0 +1,38 @@
+---
+description: Coding conventions for the Dispatch platform-engineering repo (app + infra)
+alwaysApply: true
+---
+
+# Dispatch Agent Conventions
+
+Read `AGENTS.md` first for the pillar router and global invariants. This rule captures the
+day-to-day coding conventions that must hold for every change.
+
+## Scope discipline
+- The task is infrastructure, not app features. Never change `apps/web/src` app logic.
+- Backend edits are allowed only when infra needs them (e.g. `/api/live` probe endpoint).
+- Prefer editing existing files over adding new ones; keep changes small and reviewable.
+
+## Kubernetes / Helm
+- Every container sets `requests` AND `limits`, runs non-root, and drops all capabilities.
+  Reuse the `dispatch.containerSecurity` helper — do not inline security contexts.
+- No `:latest` in manifests; images come from `values.yaml` (`kind load`ed `:local`, GHCR by SHA in CI).
+- Labels via `dispatch.commonLabels`; selectors via `dispatch.selectorLabels`. Names via `dispatch.componentName`.
+- Probes: readiness = `/api/health` (dependency-aware, 503 when Redis/Mongo down);
+  liveness/startup = `/api/live` (dependency-free). Readiness and liveness must differ.
+- Secrets live only in the `Secret` (injected via `envFrom`), never in the `ConfigMap`.
+- Validate chart changes with `helm lint` + `helm template` before claiming done.
+
+## Bootstrap script (`run-platform.sh`)
+- K8s path is the default (`up` = cluster -> deps -> deploy -> smoke); compose is `compose-*` fallback.
+- Fail fast in preflight with actionable hints. Keep functions small and single-purpose.
+- Run Python tooling from the `.tmp/infra-venv` venv — never `pip install` into system Python.
+
+## Infra tests (`tests/infra`, pytest)
+- Drive smoke/e2e through the Ingress host over HTTPS, never `kubectl port-forward`.
+- Cluster-state tests assert against the k8s API (readiness, probes, resources, secrets, HPA, ingress).
+- 4-space indentation, standard-library first; avoid adding dependencies for trivial parsing (e.g. parse SSE by hand).
+
+## Comments & style
+- Comment the "why" (trade-offs, constraints), never narrate the "what".
+- Record every non-obvious decision in `docs/conventions.md`; surface it in the README matrix.

@@ -3,15 +3,15 @@ imagePullPolicy: IfNotPresent
 
 api:
   image:
-    repository: arqh-api
+    repository: dispatch-api
     tag: sha-ci
 
 worker:
   image:
-    repository: arqh-worker
+    repository: dispatch-worker
     tag: sha-ci
 
 web:
   image:
-    repository: arqh-web
+    repository: dispatch-web
     tag: sha-ci

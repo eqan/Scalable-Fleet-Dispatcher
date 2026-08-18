@@ -1,8 +1,8 @@
-{{- define "arqh.name" -}}
+{{- define "dispatch.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "arqh.fullname" -}}
+{{- define "dispatch.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
@@ -10,24 +10,24 @@
 {{- end -}}
 {{- end -}}
 
-{{- define "arqh.componentName" -}}
-{{- printf "%s-%s" (include "arqh.fullname" .root) .name | trunc 63 | trimSuffix "-" -}}
+{{- define "dispatch.componentName" -}}
+{{- printf "%s-%s" (include "dispatch.fullname" .root) .name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "arqh.selectorLabels" -}}
+{{- define "dispatch.selectorLabels" -}}
 app.kubernetes.io/name: {{ .name }}
 app.kubernetes.io/instance: {{ .root.Release.Name }}
 {{- end -}}
 
-{{- define "arqh.commonLabels" -}}
-{{ include "arqh.selectorLabels" . }}
-app.kubernetes.io/part-of: arqh-platform
+{{- define "dispatch.commonLabels" -}}
+{{ include "dispatch.selectorLabels" . }}
+app.kubernetes.io/part-of: dispatch-platform
 app.kubernetes.io/component: {{ .component }}
 app.kubernetes.io/managed-by: {{ .root.Release.Service }}
 {{- end -}}
 
 {{/* Hardened non-root container security context. Call with (dict "uid" <id>). */}}
-{{- define "arqh.containerSecurity" -}}
+{{- define "dispatch.containerSecurity" -}}
 runAsNonRoot: true
 runAsUser: {{ .uid }}
 runAsGroup: {{ .uid }}
